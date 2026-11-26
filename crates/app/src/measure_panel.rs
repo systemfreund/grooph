@@ -237,7 +237,7 @@ impl Grooph {
     ) {
         let playback = &self.playback_ctl.playback;
         let silence = StaffSilence::of(playback, frame.playing);
-        // A silent bar shows no playback position, like the
+        // A bar silent as a whole shows no playback position, like the
         // metronome's ring: no line, no lit beat or count.
         let marks =
             if silence.hides_position {
@@ -1091,7 +1091,8 @@ fn draw_ghost_bar(ui: &egui::Ui, rect: Rect, hovered: bool) {
 /// How the bar being played shows on the staff while it is silent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StaffSilence {
-    /// No playback position: no line, no lit note or count.
+    /// No playback position: no line, no lit note or count. Only in a bar
+    /// silent as a whole; while one layer sounds, the position goes on.
     hides_position: bool,
     /// The bar under a veil with 🔇: silent as a whole.
     veiled: Option<MeasureIdx>,
@@ -1110,7 +1111,7 @@ impl StaffSilence {
             GapMute::Metronome | GapMute::Everything => None,
         };
         Self {
-            hides_position: playback.bar_muted,
+            hides_position: playback.bar_muted && layer.is_none(),
             veiled: bar.filter(|_| layer.is_none()),
             faded: bar.zip(layer),
         }
@@ -1435,7 +1436,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_bar_silencing_one_layer_fades_its_voice_without_veil_or_position() {
+    fn a_bar_silencing_one_layer_fades_its_voice_and_keeps_the_position() {
         use crate::state::PlaybackState;
         let silence = |muted, mute| {
             let playback = PlaybackState { bar_muted: muted, bar_mute: mute, ..Default::default() };
@@ -1444,11 +1445,11 @@ mod tests {
         let counter = MetronomeVoice::Counter.idx();
         assert_eq!(
             silence(true, GapMute::Counter),
-            StaffSilence { hides_position: true, veiled: None, faded: Some((2, counter)) }
+            StaffSilence { hides_position: false, veiled: None, faded: Some((2, counter)) }
         );
         assert_eq!(
             silence(true, GapMute::ClickBar),
-            StaffSilence { hides_position: true, veiled: None, faded: Some((2, 0)) }
+            StaffSilence { hides_position: false, veiled: None, faded: Some((2, 0)) }
         );
         // A bar silent as a whole: veiled, as before.
         for mute in [GapMute::Metronome, GapMute::Everything] {

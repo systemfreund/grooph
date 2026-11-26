@@ -1094,7 +1094,8 @@ fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
 
 /// How a silent bar shows on the ring: the ring of each layer it silences
 /// is dimmed and lights nothing (the click bar's ring and its dots, or the
-/// counter rhythm's ring), and the hand is hidden in any silent bar.
+/// counter rhythm's ring). The hand is hidden in a bar silent as a whole;
+/// while one layer still sounds, it goes on with it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RingSilence {
     pub(crate) click_bar: bool,
@@ -1108,7 +1109,7 @@ impl RingSilence {
         Self {
             click_bar: playback.click_bar_muted(),
             counter: playback.counter_muted(),
-            hand: !playback.bar_muted,
+            hand: !playback.bar_muted || playback.bar_mute.one_layer(),
         }
     }
 }
@@ -1969,8 +1970,9 @@ mod tests {
             })
         };
         let ring = |click_bar, counter, hand| RingSilence { click_bar, counter, hand };
-        assert_eq!(silence(true, GapMute::Counter), ring(false, true, false));
-        assert_eq!(silence(true, GapMute::ClickBar), ring(true, false, false));
+        // One layer sounds on: the hand goes on with it.
+        assert_eq!(silence(true, GapMute::Counter), ring(false, true, true));
+        assert_eq!(silence(true, GapMute::ClickBar), ring(true, false, true));
         assert_eq!(silence(true, GapMute::Metronome), ring(true, true, false));
         assert_eq!(silence(true, GapMute::Everything), ring(true, true, false));
         for mute in [GapMute::Metronome, GapMute::ClickBar, GapMute::Counter] {

@@ -697,8 +697,10 @@ grooph's metronome runs inside AI chats as an
   (`PlaybackState::bar_muted`, with the mute played in `bar_mute`). A bar
   silent as a whole has a veil and 🔇 on the staff; a bar silencing one layer
   draws that voice with faded ink (`RenderContext::faded`) and no veil
-  (`measure_panel::StaffSilence`). Either shows no playback position, and the
-  ring dims the silent layer's ring and hides its hand (`RingSilence`). The
+  (`measure_panel::StaffSilence`). The ring dims the silent layer's ring
+  (`RingSilence`). A bar silent as a whole shows no playback position (no
+  line, no lit note, no hand on the ring); while one layer sounds, the
+  position and the hand go on. The
   flash follows the click bar (`PlaybackState::flash_shown`), and timing
   feedback counts any silent bar as silent. Silent bars are not in links and
   not undoable.
