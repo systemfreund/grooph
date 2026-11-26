@@ -6,7 +6,7 @@ use grooph_measure::{Instrument, Score};
 use super::drift::Drift;
 use super::positions::PositionTallies;
 use super::progress::update_progress;
-use super::recorder::record_hit;
+use super::recorder::{Until, finalise, record_hit};
 use super::session::{
     AccuracyMark, ExtraMark, NoteKey, RecordingSession, RunSummary, TRACKED_VOICES, shift_extras,
     shift_marks,
@@ -99,6 +99,8 @@ impl AccuracyTracker {
 
     fn end_session(&mut self) {
         if let Some(data) = self.session.data_mut() {
+            // The open stretch with the hits in, as far as it got.
+            finalise(data, Until::Stop);
             data.bars.settle();
         }
         if let Some(data) = self.session.data()
@@ -242,8 +244,10 @@ impl AccuracyTracker {
         marks.get(&key).copied()
     }
 
-    /// A hit on a one-line score (from any source). Returns the hit's
-    /// deviation in ms if it was matched to a note.
+    /// A hit on a one-line score (from any source). Which note it counts
+    /// for is decided once that note is final (see `recorder::record_hit`).
+    /// Returns the hit's deviation in ms from the nearest note, at once:
+    /// the calibration's measure.
     pub(crate) fn record_hit(
         &mut self,
         timestamp: f64,
@@ -253,8 +257,10 @@ impl AccuracyTracker {
         record_hit(self.session.data_mut()?, timestamp, None, timing, score)
     }
 
-    /// A hit on `instrument`: on a kit score matched against its heads only
+    /// A hit on `instrument`: on a kit score aligned with its heads only
     /// (see `recorder::record_hit`), on one line as [`Self::record_hit`].
+    /// Returns the deviation from the instrument's nearest head within the
+    /// catch window.
     pub(crate) fn record_instrument_hit(
         &mut self,
         timestamp: f64,
@@ -339,6 +345,9 @@ mod tests {
         let m1_start_tick = timing.measure_start_tick(1);
         let m1_start_seconds = timing.global_tick_to_seconds(m1_start_tick as f64);
         tracker.record_hit(start_time + m1_start_seconds, &timing, &score);
+        // Final halfway between the next two notes.
+        assert!(tracker.mark_for_onset(m1_start_tick).is_none());
+        tracker.update_progress(m1_start_seconds + 0.76, &timing, &score);
 
         let mark = tracker.mark_for_onset(m1_start_tick).expect("expected a hit");
         match mark {
@@ -435,6 +444,9 @@ mod tests {
         tracker.record_hit(timing.global_tick_to_seconds(0.0), &timing, &score);
         tracker.record_hit(timing.global_tick_to_seconds(q / 2.0), &timing, &score);
         tracker.update_progress(timing.global_tick_to_seconds(1.9 * q), &timing, &score);
+        // The second quarter is final halfway between the next loop's two
+        // first notes.
+        tracker.update_progress(timing.global_tick_to_seconds(2.3 * q), &timing, &score);
 
         let [Some(click), Some(counter)] = tracker.live_voice_summaries() else {
             panic!("both voices have notes");
@@ -460,6 +472,7 @@ mod tests {
         tracker.on_playback_start_at(0.0, 0.0);
         assert_eq!(tracker.live_voice_summaries(), [None, None]);
         tracker.record_hit(0.0, &timing, &score);
+        tracker.update_progress(0.8, &timing, &score);
         assert!(matches!(tracker.live_voice_summaries(), [Some(_), None]));
     }
 
@@ -470,12 +483,13 @@ mod tests {
         let timing = ScoreTiming::from_score(&score, 120);
         let mut tracker = AccuracyTracker::new();
         tracker.on_playback_start_at(0.0, 0.0);
-        // A hit on it (0.5 s) arrives at 0.8 s with 200 ms latency: misses
-        // are judged 0.26 s behind, so not yet.
+        // A hit on it (0.5 s) arrives at 0.8 s with 200 ms latency: notes
+        // are judged 0.26 s behind, so not yet. It is final at 1.25 s,
+        // halfway between the next two notes.
         let delay = 0.26;
         tracker.update_progress(0.8 - delay, &timing, &score);
         tracker.record_hit(0.8 - 0.3, &timing, &score);
-        tracker.update_progress(1.2 - delay, &timing, &score);
+        tracker.update_progress(1.55 - delay, &timing, &score);
         let summary = tracker.live_summary().unwrap();
         assert_eq!((summary.hits, summary.misses), (1, 1), "the first note was missed");
         assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Miss)));
@@ -492,8 +506,8 @@ mod tests {
         // hit on the next loop's first note comes in.
         tracker.update_progress(1.9, &timing, &score);
         tracker.record_hit(2.02, &timing, &score);
-        // Past that note's window: it was hit, not missed.
-        tracker.update_progress(2.3, &timing, &score);
+        // Past that note's lookahead: it was hit, not missed.
+        tracker.update_progress(2.8, &timing, &score);
         let summary = tracker.live_summary().unwrap();
         assert_eq!((summary.hits, summary.misses), (1, 4));
         assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
@@ -507,12 +521,16 @@ mod tests {
         tracker.on_playback_start_at(0.0, 0.0);
         tracker.update_progress(1.9, &timing, &score);
         tracker.update_progress(2.1, &timing, &score);
-        // Later than any delay: a hit on the first loop's last note (1.5 s).
-        // It counts, but leaves the second loop's last note to be missed.
+        // Later than any delay: a hit on the first loop's last note (1.5 s),
+        // not final before 2.25 s. It counts for it.
         tracker.record_hit(1.5, &timing, &score);
         tracker.update_progress(3.9, &timing, &score);
         let summary = tracker.live_summary().unwrap();
-        assert_eq!((summary.hits, summary.misses), (1, 8));
+        assert_eq!((summary.hits, summary.misses), (1, 6));
+        assert!(matches!(tracker.mark_for_onset(3 * 5040), Some(AccuracyMark::Hit { .. })));
+        // The second loop's last note is missed when not played.
+        tracker.update_progress(4.3, &timing, &score);
+        assert_eq!(tracker.live_summary().unwrap().misses, 7);
         assert!(matches!(tracker.mark_for_onset(3 * 5040), Some(AccuracyMark::Miss)));
     }
 
@@ -527,7 +545,7 @@ mod tests {
         // first note (played at 1.98 s) comes in: it is that note's.
         tracker.update_progress(2.01, &timing, &score);
         tracker.record_hit(1.98, &timing, &score);
-        tracker.update_progress(2.4, &timing, &score);
+        tracker.update_progress(2.8, &timing, &score);
         let summary = tracker.live_summary().unwrap();
         assert_eq!((summary.hits, summary.misses), (1, 4));
         assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
@@ -545,8 +563,10 @@ mod tests {
         tracker.update_progress(3.5, &timing, &score);
         assert_eq!(tracker.live_summary(), None);
         tracker.record_hit(3.5, &timing, &score);
+        tracker.update_progress(4.3, &timing, &score);
         // First loop: 4 missed; second loop: 3 missed before the hit.
-        assert_eq!(tracker.live_summary().unwrap().misses, 7);
+        let summary = tracker.live_summary().unwrap();
+        assert_eq!((summary.hits, summary.misses), (1, 7));
     }
 
     #[test]
@@ -560,10 +580,11 @@ mod tests {
         // steps back, which is no wrap.
         tracker.update_progress_behind(1.05, 0.36, &timing, &score);
         tracker.update_progress_behind(1.3, 0.36, &timing, &score);
-        tracker.record_hit(0.0, &timing, &score);
+        tracker.record_hit(1.0, &timing, &score);
+        tracker.update_progress_behind(2.2, 0.36, &timing, &score);
         let summary = tracker.live_summary().unwrap();
         // The first two notes were missed, no more: no wrap.
-        assert_eq!(summary.misses, 2);
+        assert_eq!((summary.hits, summary.misses), (1, 2));
     }
 
     #[test]
@@ -597,6 +618,9 @@ mod tests {
         let tpb = DEFAULT_GRID.ticks_per_beat(&TimeSignature::TWO_FOUR) as f64;
         let secs = timing.global_tick_to_seconds(tpb);
         tracker.record_hit(secs, &timing, &score);
+        // Final once the next loop's note is half a second behind.
+        tracker.update_progress(0.9, &timing, &score);
+        tracker.update_progress(1.6, &timing, &score);
 
         // Match should fall back to the only Note beat (onset 0), not the rest.
         assert!(tracker.mark_for_onset(0).is_some());
@@ -615,6 +639,7 @@ mod tests {
         // Second hit at slightly different time but still closest to onset 0:
         // should not overwrite, but also not panic.
         tracker.record_hit(onset_seconds + 0.001, &timing, &score);
+        tracker.update_progress(0.8, &timing, &score);
         let mark = tracker.mark_for_onset(0).expect("first hit recorded");
         match mark {
             AccuracyMark::Hit { diff_ticks: diff, .. } => assert!(diff.abs() < 1e-6, "diff={diff}"),
@@ -629,12 +654,11 @@ mod tests {
         let mut tracker = AccuracyTracker::new();
         tracker.on_playback_start_at(0.0, 0.0);
 
-        // Advance time past the first note of measure 1's hit window without
-        // recording any hits. That first note's window-end is between its
-        // onset and the next note (½ quarter later).
+        // Advance time past the first note of measure 1's lookahead without
+        // recording any hits: halfway between the next two notes.
         let m1_first_onset = timing.measure_start_tick(1);
         let tpb = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
-        let window_end_tick = m1_first_onset as f64 + 0.75 * tpb;
+        let window_end_tick = m1_first_onset as f64 + 1.6 * tpb;
         let window_end_secs = timing.global_tick_to_seconds(window_end_tick);
         tracker.update_progress(window_end_secs, &timing, &score);
 
@@ -663,6 +687,7 @@ mod tests {
         let performed = timing.performed_global_tick(0, written);
         assert_ne!(performed, written as u64);
         tracker.record_hit(timing.global_tick_to_seconds(performed as f64), &timing, &score);
+        tracker.update_progress(1.0, &timing, &score);
 
         // The mark belongs to the written note and is dead on.
         match tracker.mark_for_onset(written as u64).expect("hit on the swung note") {
@@ -685,8 +710,11 @@ mod tests {
         // beats 3 and 4 skipped.
         tracker.record_hit(0.0, &timing, &score);
         assert_eq!(tracker.record_hit(beat_s + 0.010, &timing, &score).map(f64::round), Some(10.0));
-        assert_eq!(tracker.record_hit(beat_s + 0.050, &timing, &score), None);
+        // The calibration's delta, to the nearest note, for either.
+        assert_eq!(tracker.record_hit(beat_s + 0.050, &timing, &score).map(f64::round), Some(50.0));
         tracker.update_progress(beat_s * 3.9, &timing, &score);
+        // The last note is final halfway into the next loop's first beat.
+        tracker.update_progress(beat_s * 4.6, &timing, &score);
 
         let live = tracker.live_summary().expect("hits recorded");
         assert_eq!(live.hits, 2);
@@ -712,7 +740,7 @@ mod tests {
         let mut tracker = AccuracyTracker::new();
         tracker.on_playback_start_at(0.0, 0.0);
         tracker.record_hit(0.0, &timing, &score);
-        tracker.update_progress(beat_s * 1.9, &timing, &score);
+        tracker.update_progress(beat_s * 2.6, &timing, &score);
         tracker.on_playback_stop();
 
         assert!(tracker.has_marks());
@@ -752,6 +780,7 @@ mod tests {
         tracker.on_playback_start_at(0.0, 0.0);
         tracker.record_hit(0.0, &timing, &score);
         tracker.record_hit(timing.global_tick_to_seconds(m1_start as f64), &timing, &score);
+        tracker.update_progress(2.8, &timing, &score);
 
         // Measure 0 is dropped: its mark goes, measure 1's is now at 0.
         tracker.drop_leading_ticks(m1_start);
@@ -796,6 +825,7 @@ mod tests {
         tracker.record_hit(0.040, &timing, &score);
         let second = timing.global_tick_to_seconds(sixteenth);
         tracker.record_hit(second + 0.030, &timing, &score);
+        tracker.update_progress(0.4, &timing, &score);
 
         let grade = |tick: u64| match tracker.mark_for_onset(tick) {
             Some(AccuracyMark::Hit { grade, .. }) => grade,
@@ -836,7 +866,8 @@ mod tests {
         frames_behind(&mut tracker, (0.0, 0.4), 0.06, &score, &timing);
         let delta = tracker.record_hit(0.4, &timing, &score).expect("A's hit");
         assert!((delta - 400.0).abs() < 1e-6);
-        frames_behind(&mut tracker, (0.4, 0.9), 0.06, &score, &timing);
+        // Final halfway between B and the note after it.
+        frames_behind(&mut tracker, (0.4, 1.4), 0.06, &score, &timing);
         let s = tracker.live_summary().unwrap();
         assert_eq!((s.hits, s.misses, s.extra), (1, 0, 0));
         assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
@@ -875,16 +906,17 @@ mod tests {
     fn a_bar_starting_with_rests_judges_its_last_note_past_the_loop_end() {
         use grooph_measure::notation::parse_score;
         // Notes at 1 s and 1.5 s of a 2 s loop: the last one's window ends
-        // halfway to the next loop's first note, at 2.25 s.
+        // at the next loop's first note, and it is final halfway between
+        // that one and the next, at 3.25 s.
         let score = parse_score("4/4 r:h q q").unwrap();
         let timing = ScoreTiming::from_score(&score, 120);
         let last = timing.seconds_to_global_tick(1.5).round() as u64;
         let mut unplayed = AccuracyTracker::new();
         unplayed.on_playback_start_at(0.0, 0.0);
         unplayed.record_hit(1.0, &timing, &score);
-        frames_behind(&mut unplayed, (0.0, 2.2), 0.0, &score, &timing);
+        frames_behind(&mut unplayed, (0.0, 3.2), 0.0, &score, &timing);
         assert!(unplayed.mark_for_onset(last).is_none());
-        frames_behind(&mut unplayed, (2.2, 2.3), 0.0, &score, &timing);
+        frames_behind(&mut unplayed, (3.2, 3.3), 0.0, &score, &timing);
         assert!(matches!(unplayed.mark_for_onset(last), Some(AccuracyMark::Miss)));
         // Played 600 ms late, after the loop's end: a hit, and no miss.
         let mut late = AccuracyTracker::new();
@@ -893,7 +925,7 @@ mod tests {
         frames_behind(&mut late, (0.0, 2.05), 0.0, &score, &timing);
         let delta = late.record_hit(2.1, &timing, &score).expect("the last note's hit");
         assert!((delta - 600.0).abs() < 1e-6);
-        frames_behind(&mut late, (2.05, 2.3), 0.0, &score, &timing);
+        frames_behind(&mut late, (2.05, 3.3), 0.0, &score, &timing);
         let s = late.live_summary().unwrap();
         assert_eq!((s.hits, s.misses, s.extra), (2, 0, 0));
     }
@@ -1007,6 +1039,8 @@ mod kit_tests {
         let mut tracker = recording();
         assert_eq!(tracker.record_instrument_hit(0.0, Kick, &timing, &score), Some(0.0));
         assert_eq!(tracker.record_instrument_hit(0.0, HiHat, &timing, &score), Some(0.0));
+        // The kick is final halfway to the next bar's kick, at 1.5 s.
+        tracker.update_progress(1.6, &timing, &score);
         assert_eq!(grade(&tracker, 0, Kick), Some(HitGrade::Perfect));
         assert_eq!(grade(&tracker, 0, HiHat), Some(HitGrade::Perfect));
         let live = tracker.live_summary().unwrap();
@@ -1019,12 +1053,16 @@ mod kit_tests {
         let mut tracker = recording();
         tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
         tracker.record_instrument_hit(0.25, HiHat, &timing, &score);
-        // The kick's window ends halfway to the next kick, at 0.5 s.
+        // The kick's window ends 150 ms after it; it is final at 1.5 s. A
+        // stop before that judges what it has.
         tracker.update_progress(0.55, &timing, &score);
+        assert!(tracker.mark_for_head(0, Kick).is_none());
+        tracker.on_playback_stop();
         assert!(matches!(tracker.mark_for_head(0, Kick), Some(AccuracyMark::Miss)));
         assert_eq!(grade(&tracker, 0, HiHat), Some(HitGrade::Perfect));
-        let live = tracker.live_summary().unwrap();
-        assert_eq!((live.hits, live.misses, live.extra), (2, 1, 0));
+        // The hi-hat on 2, its window still open, is no miss.
+        let last = tracker.last_summary().unwrap();
+        assert_eq!((last.hits, last.misses, last.extra), (2, 1, 0));
     }
 
     #[test]
@@ -1037,10 +1075,13 @@ mod kit_tests {
         assert!(tracker.mark_for_head(0, Kick).is_none());
         assert!(tracker.mark_for_head(tick_at(&timing, 0.5), Snare).is_none());
         assert!(tracker.mark_for_head(tick_at(&timing, 1.0), Kick).is_none());
+        // Extra at once; the hi-hat once final.
+        tracker.update_progress(0.4, &timing, &score);
         let live = tracker.live_summary().unwrap();
         assert_eq!((live.hits, live.extra), (1, 1));
         // Both kicks are still open, and missed when not played.
         tracker.update_progress(1.9, &timing, &score);
+        tracker.update_progress(2.6, &timing, &score);
         assert!(matches!(tracker.mark_for_head(0, Kick), Some(AccuracyMark::Miss)));
         assert!(matches!(
             tracker.mark_for_head(tick_at(&timing, 1.0), Kick),
@@ -1054,18 +1095,20 @@ mod kit_tests {
         let mut tracker = recording();
         let delta = tracker.record_instrument_hit(0.1, Kick, &timing, &score).expect("caught");
         assert!((delta - 100.0).abs() < 1e-6);
+        tracker.update_progress(1.6, &timing, &score);
         assert_eq!(grade(&tracker, 0, Kick), Some(HitGrade::Off));
 
         let mut tracker = recording();
         tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
         assert_eq!(tracker.record_instrument_hit(0.2, Kick, &timing, &score), None);
+        tracker.update_progress(0.4, &timing, &score);
         assert!(tracker.mark_for_head(0, Kick).is_none());
         let live = tracker.live_summary().unwrap();
         assert_eq!((live.hits, live.extra), (1, 1));
     }
 
     #[test]
-    fn the_catch_window_ends_halfway_to_the_instruments_next_note() {
+    fn the_calibration_delta_is_to_the_instruments_nearest_head() {
         // Hi-hat sixteenths at 120 BPM: 125 ms apart.
         let score = parse_score("4/4 H:s H:s H:s H:s H:q H:q H:q").unwrap();
         let timing = ScoreTiming::from_score(&score, 120);
@@ -1073,10 +1116,9 @@ mod kit_tests {
         // 70 ms after the first: closer to the second, 55 ms early on it.
         let delta = tracker.record_instrument_hit(0.07, HiHat, &timing, &score).unwrap();
         assert!((delta + 55.0).abs() < 1e-6);
-        // The last sixteenth's window reaches 150 ms late, short of halfway
-        // to the quarter after it (250 ms): 140 ms late is caught.
+        // 140 ms after the quarter on 3: within the catch window.
         let mut tracker = recording();
-        assert!(tracker.record_instrument_hit(0.375 + 0.14, HiHat, &timing, &score).is_some());
+        assert!(tracker.record_instrument_hit(1.0 + 0.14, HiHat, &timing, &score).is_some());
     }
 
     #[test]
@@ -1085,6 +1127,7 @@ mod kit_tests {
         let mut tracker = recording();
         assert_eq!(tracker.record_hit(0.0, &timing, &score), None);
         tracker.record_instrument_hit(0.25, HiHat, &timing, &score);
+        tracker.update_progress(0.7, &timing, &score);
         let live = tracker.live_summary().unwrap();
         assert_eq!((live.hits, live.extra), (1, 0));
     }
@@ -1095,6 +1138,7 @@ mod kit_tests {
         let timing = ScoreTiming::from_score(&score, 120);
         let mut tracker = recording();
         assert!(tracker.record_instrument_hit(0.5, HiHatFoot, &timing, &score).is_some());
+        tracker.on_playback_stop();
         assert_eq!(grade(&tracker, tick_at(&timing, 0.5), HiHatFoot), Some(HitGrade::Perfect));
     }
 
@@ -1111,6 +1155,7 @@ mod kit_tests {
         let mut tracker = recording();
         tracker.record_instrument_hit(0.020, Kick, &timing, &score);
         tracker.record_instrument_hit(0.020, HiHat, &timing, &score);
+        tracker.on_playback_stop();
         assert_eq!(grade(&tracker, 0, Kick), Some(HitGrade::Perfect));
         assert_eq!(grade(&tracker, 0, HiHat), Some(HitGrade::Good));
     }
@@ -1129,16 +1174,18 @@ mod kit_tests {
         assert!(tracker.record_instrument_hit(2.0 * eighth + 0.1, Kick, &timing, &score).is_some());
         assert_eq!(tracker.record_instrument_hit(eighth, Kick, &timing, &score), None);
         tracker.record_instrument_hit(eighth, HiHat, &timing, &score);
+        tracker.on_playback_stop();
         assert_eq!(grade(&tracker, tick_at(&timing, 2.0 * eighth), Kick), Some(HitGrade::Off));
         assert_eq!(grade(&tracker, tick_at(&timing, eighth), HiHat), Some(HitGrade::Perfect));
-        let live = tracker.live_summary().unwrap();
+        let live = tracker.last_summary().unwrap();
         assert_eq!((live.hits, live.extra), (2, 1));
     }
 
     /// Kicks on beat 2 (0.5 s) and on the bar's last sixteenth (1.875 s)
     /// under hi-hat eighths at 120 BPM: the loop is 2 s, and the last kick's
     /// window runs on past the loop's end, to its catch window's end
-    /// (2.025 s; halfway to the next loop's first kick would be 2.1875 s).
+    /// (2.025 s). It is final 500 ms after the next loop's first kick, at
+    /// 3 s (halfway to the one after would be 3.1875 s).
     fn kicks_across_the_loop_end() -> (Score, ScoreTiming) {
         let score = parse_score("4/4 H:e H:e H-K:e H:e H:e H:e H:e H:s K:s").unwrap();
         let timing = ScoreTiming::from_score(&score, 120);
@@ -1169,15 +1216,14 @@ mod kit_tests {
         // The first loop: no kick of a loop before it to judge.
         frames(&mut tracker, 0.0, 0.3, &score, &timing);
         assert!(tracker.mark_for_head(last_kick, Kick).is_none());
-        // The last kick goes unplayed: missed once its window closes,
-        // 25 ms into the next loop.
-        frames(&mut tracker, 0.3, 2.0, &score, &timing);
+        // The last kick goes unplayed: missed once final, in the next loop.
+        frames(&mut tracker, 0.3, 2.95, &score, &timing);
         assert!(tracker.mark_for_head(last_kick, Kick).is_none());
-        frames(&mut tracker, 2.0, 2.05, &score, &timing);
+        frames(&mut tracker, 2.95, 3.01, &score, &timing);
         assert!(matches!(tracker.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
         let misses = tracker.live_summary().unwrap().misses;
-        // Judged once (the next window to close is the hi-hat's at 2.125 s).
-        frames(&mut tracker, 2.05, 2.12, &score, &timing);
+        // Judged once (the next note final is a hi-hat at 3.125 s).
+        frames(&mut tracker, 3.01, 3.12, &score, &timing);
         assert_eq!(tracker.live_summary().unwrap().misses, misses);
     }
 
@@ -1188,7 +1234,7 @@ mod kit_tests {
         // The same run without the kick: one miss more.
         let mut unplayed = recording();
         unplayed.record_instrument_hit(0.0, HiHat, &timing, &score);
-        frames(&mut unplayed, 0.0, 2.4, &score, &timing);
+        frames(&mut unplayed, 0.0, 3.1, &score, &timing);
         let all_missed = unplayed.live_summary().unwrap().misses;
         assert!(matches!(unplayed.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
         // The hit comes in before or after the cursor wrapped, before the
@@ -1198,7 +1244,7 @@ mod kit_tests {
             tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
             frames(&mut tracker, 0.0, cursor_at, &score, &timing);
             tracker.record_instrument_hit(2.015, Kick, &timing, &score).expect("caught");
-            frames(&mut tracker, cursor_at, 2.4, &score, &timing);
+            frames(&mut tracker, cursor_at, 3.1, &score, &timing);
             assert_eq!(grade(&tracker, last_kick, Kick), Some(HitGrade::Off), "{cursor_at}");
             let live = tracker.live_summary().unwrap();
             assert_eq!((live.hits, live.extra), (2, 0), "{cursor_at}");
@@ -1217,6 +1263,7 @@ mod kit_tests {
         let delta = tracker.record_instrument_hit(2.015, Kick, &timing, &score).expect("caught");
         assert!((delta - 140.0).abs() < 1e-6, "{delta}");
         tracker.update_progress(2.3, &timing, &score);
+        tracker.update_progress(3.1, &timing, &score);
         assert_eq!(grade(&tracker, last_kick, Kick), Some(HitGrade::Off));
         let live = tracker.live_summary().unwrap();
         // The kick was hit, not missed as well; nothing extra.
@@ -1225,6 +1272,7 @@ mod kit_tests {
         // Its next loop's kick is missed when not played.
         tracker.update_progress(3.95, &timing, &score);
         tracker.update_progress(4.3, &timing, &score);
+        tracker.update_progress(5.1, &timing, &score);
         assert!(matches!(tracker.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
     }
 
@@ -1233,12 +1281,14 @@ mod kit_tests {
         let (score, timing) = kicks_across_the_loop_end();
         let first_kick = tick_at(&timing, 0.5);
         let mut tracker = recording();
+        tracker.update_progress(1.8, &timing, &score);
         tracker.record_instrument_hit(1.875, Kick, &timing, &score);
         tracker.update_progress(2.3, &timing, &score);
         // 140 ms early on the next loop's first kick (2.5 s).
         let delta = tracker.record_instrument_hit(2.36, Kick, &timing, &score).expect("caught");
         assert!((delta + 140.0).abs() < 1e-6, "{delta}");
         tracker.update_progress(3.0, &timing, &score);
+        tracker.update_progress(4.3, &timing, &score);
         assert_eq!(grade(&tracker, first_kick, Kick), Some(HitGrade::Off));
         let live = tracker.live_summary().unwrap();
         assert_eq!(live.extra, 0);
@@ -1263,15 +1313,18 @@ mod kit_tests {
         // Dead on where it sounds: perfect, marked on the written note.
         let delta = tracker.record_instrument_hit(sounds, Kick, &timing, &score).unwrap();
         assert!(delta.abs() < 1e-6, "{delta}");
+        tracker.on_playback_stop();
         assert_eq!(grade(&tracker, and, Kick), Some(HitGrade::Perfect));
         // 100 ms late on the swung kick: caught, off; 200 ms: extra.
         let mut tracker = recording();
         assert!(tracker.record_instrument_hit(sounds + 0.1, Kick, &timing, &score).is_some());
+        tracker.on_playback_stop();
         assert_eq!(grade(&tracker, and, Kick), Some(HitGrade::Off));
         let mut tracker = recording();
         tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
         assert_eq!(tracker.record_instrument_hit(sounds + 0.2, Kick, &timing, &score), None);
-        assert_eq!(tracker.live_summary().unwrap().extra, 1);
+        tracker.on_playback_stop();
+        assert_eq!(tracker.last_summary().unwrap().extra, 1);
     }
 
     /// The tick distance of `seconds` at the groove's tempo.
@@ -1305,6 +1358,9 @@ mod kit_tests {
         let mut tracker = recording();
         tracker.record_instrument_hit(0.0, Kick, &timing, &score);
         tracker.record_instrument_hit(0.03, Kick, &timing, &score);
+        // Extra once the kick is final.
+        assert!(tracker.extra_marks().is_empty());
+        tracker.update_progress(1.6, &timing, &score);
         let extras = tracker.extra_marks();
         assert_eq!(extras.len(), 1);
         assert_eq!((extras[0].instrument, extras[0].anchor_tick), (Kick, 0));
@@ -1351,6 +1407,8 @@ mod kit_tests {
         let mut tracker = recording();
         tracker.record_hit(0.0, &timing, &score);
         tracker.record_hit(0.05, &timing, &score);
+        // Extra once the second note is final, which it might have been for.
+        tracker.update_progress(1.3, &timing, &score);
         assert_eq!(tracker.live_summary().unwrap().extra, 1);
         let extras = tracker.extra_marks();
         assert_eq!(extras.len(), 1);
@@ -1361,22 +1419,23 @@ mod kit_tests {
     }
 
     #[test]
-    fn a_kit_note_is_missed_when_its_catch_window_closes() {
-        // A crash once a bar at 120 BPM: halfway to the next one is 1 s
-        // away, but it can only be hit within 150 ms.
+    fn a_kit_note_is_missed_without_a_hit_in_its_catch_window() {
+        // A crash once a bar at 120 BPM: the next one is 2 s away, but it
+        // can only be hit within 150 ms.
         let score = parse_score("4/4 H-CR:q H:q H:q H:q").unwrap();
         let timing = ScoreTiming::from_score(&score, 120);
         let mut tracker = recording();
         tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
-        frames(&mut tracker, 0.0, 0.14, &score, &timing);
-        assert!(tracker.mark_for_head(0, Instrument::Crash).is_none());
-        frames(&mut tracker, 0.14, 0.2, &score, &timing);
-        assert!(matches!(tracker.mark_for_head(0, Instrument::Crash), Some(AccuracyMark::Miss)));
-        // A crash after that is extra: the windows to hit and to miss a note
-        // are one.
+        // A crash 200 ms late is extra, at once.
         assert_eq!(tracker.record_instrument_hit(0.2, Instrument::Crash, &timing, &score), None);
+        assert_eq!(tracker.extra_marks().len(), 1);
+        // The crash is final 500 ms after the next one, and missed.
+        frames(&mut tracker, 0.0, 2.45, &score, &timing);
+        assert!(tracker.mark_for_head(0, Instrument::Crash).is_none());
+        frames(&mut tracker, 2.45, 2.55, &score, &timing);
+        assert!(matches!(tracker.mark_for_head(0, Instrument::Crash), Some(AccuracyMark::Miss)));
         let live = tracker.live_summary().unwrap();
-        assert_eq!((live.hits, live.misses, live.extra), (1, 1, 1));
+        assert_eq!((live.hits, live.extra), (1, 1));
     }
 
     #[test]
@@ -1389,6 +1448,8 @@ mod kit_tests {
         tracker.update_progress(1.9, &timing, &score);
         tracker.record_instrument_hit(2.010, HiHat, &timing, &score);
         tracker.update_progress(3.8, &timing, &score);
+        // The second loop's chord is final 500 ms into the third.
+        tracker.update_progress(4.6, &timing, &score);
         let live = tracker.live_summary().unwrap();
         assert_eq!((live.hits, live.misses), (2, 2));
         let [voice, _] = tracker.live_voice_summaries();
@@ -1396,6 +1457,442 @@ mod kit_tests {
         assert_eq!((voice.hits, voice.misses), (2, 2));
         tracker.on_playback_stop();
         let drift = tracker.last_drift().expect("two hits");
-        assert_eq!((drift.hits.len(), drift.misses.len()), (2, 2));
+        // At the stop, the third loop's chord is missed as well: its
+        // windows had closed.
+        assert_eq!((drift.hits.len(), drift.misses.len()), (2, 4));
+    }
+}
+
+/// Hits are paired with notes by an alignment over a short stretch, which
+/// becomes final after a lookahead (see `align`).
+#[cfg(test)]
+mod alignment_tests {
+    use super::*;
+    use grooph_measure::notation::parse_score;
+
+    /// Eighths at 120 BPM: a gap of 250 ms, a loop of 2 s.
+    const GAP: f64 = 0.25;
+
+    fn eighths() -> (Score, ScoreTiming) {
+        let score = parse_score("4/4 e e e e e e e e").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        (score, timing)
+    }
+
+    /// Plays `hits` (s) as they come in, frame by frame from 0 to `to`,
+    /// judging 60 ms behind the clock as with a hit source's offset.
+    fn play(score: &Score, timing: &ScoreTiming, hits: &[f64], to: f64) -> AccuracyTracker {
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        let mut hits = hits.iter().copied().peekable();
+        let mut now = 0.0;
+        while now < to {
+            now = (now + 1.0 / 60.0).min(to);
+            while let Some(hit) = hits.next_if(|&h| h <= now) {
+                tracker.record_hit(hit, timing, score);
+            }
+            tracker.update_progress_behind(now, 0.06, timing, score);
+        }
+        tracker
+    }
+
+    /// The deviation of the mark on the note at `index` eighths, in gaps;
+    /// `None` for a miss, and a panic for no mark.
+    fn deviation(tracker: &AccuracyTracker, timing: &ScoreTiming, index: u64) -> Option<f64> {
+        let gap_ticks = timing.total_loop_ticks() as f64 / 8.0;
+        match tracker.mark_for_onset(index * gap_ticks as u64) {
+            Some(AccuracyMark::Hit { diff_ticks, .. }) => Some(diff_ticks / gap_ticks),
+            Some(AccuracyMark::Miss) => None,
+            None => panic!("no mark on note {index}"),
+        }
+    }
+
+    /// A case of the issue's table: A is the third eighth, B the fourth, C
+    /// the fifth; the first two and the sixth are played on time as well.
+    /// `played` in gaps from the bar's start. Returns the deviations of A,
+    /// B and C (in gaps, `None` for a miss) and hits, misses and extras of
+    /// the first six notes.
+    fn case(played: &[f64]) -> ([Option<f64>; 3], (u64, u64, u64)) {
+        let (score, timing) = eighths();
+        let mut hits = vec![0.0, 1.0, 5.0];
+        hits.extend_from_slice(played);
+        hits.sort_by(f64::total_cmp);
+        let hits: Vec<f64> = hits.iter().map(|g| g * GAP).collect();
+        // The sixth note is final at 1.625 s, the seventh not before 1.875 s.
+        let tracker = play(&score, &timing, &hits, 1.85 + 0.06);
+        let s = tracker.live_summary().unwrap();
+        let notes = [2, 3, 4].map(|i| deviation(&tracker, &timing, i));
+        (notes.map(|d| d.map(|d| (d * 100.0).round() / 100.0)), (s.hits, s.misses, s.extra))
+    }
+
+    #[test]
+    fn a_late_hit_counts_for_its_note_when_the_next_gets_its_own() {
+        // A 0.6 late, B on time: A +0.6, B ±0.
+        assert_eq!(case(&[2.6, 3.0, 4.0]), ([Some(0.6), Some(0.0), Some(0.0)], (6, 0, 0)));
+    }
+
+    #[test]
+    fn a_hit_late_by_more_than_three_quarters_of_the_gap_is_extra() {
+        // A 0.8 late, B on time: extra, A missed, B ±0.
+        assert_eq!(case(&[2.8, 3.0, 4.0]), ([None, Some(0.0), Some(0.0)], (5, 1, 1)));
+    }
+
+    #[test]
+    fn a_late_hit_without_one_on_the_next_note_goes_to_the_nearer() {
+        // A 0.6 late, B missing: A missed, B −0.4.
+        assert_eq!(case(&[2.6, 4.0]), ([None, Some(-0.4), Some(0.0)], (5, 1, 0)));
+    }
+
+    #[test]
+    fn two_late_hits_before_an_on_time_one() {
+        // A and B each 0.6 late, C on time: A missed, B −0.4, extra, C ±0.
+        assert_eq!(case(&[2.6, 3.6, 4.0]), ([None, Some(-0.4), Some(0.0)], (5, 1, 1)));
+    }
+
+    #[test]
+    fn a_double_hit_after_a_missed_note() {
+        // A missing, B hit at −0.1 and +0.05: extra, A missed, B +0.05.
+        assert_eq!(case(&[2.9, 3.05, 4.0]), ([None, Some(0.05), Some(0.0)], (5, 1, 1)));
+    }
+
+    #[test]
+    fn a_flam_before_an_on_time_hit() {
+        // A played 0 and +0.3, B on time: A ±0, extra, B ±0.
+        assert_eq!(case(&[2.0, 2.3, 3.0, 4.0]), ([Some(0.0), Some(0.0), Some(0.0)], (6, 0, 1)));
+    }
+
+    #[test]
+    fn a_flam_before_a_missed_note() {
+        // A played 0 and +0.3, B missing: A ±0, B −0.7.
+        assert_eq!(case(&[2.0, 2.3, 4.0]), ([Some(0.0), Some(-0.7), Some(0.0)], (6, 0, 0)));
+    }
+
+    #[test]
+    fn a_single_hit_between_two_unplayed_notes_goes_to_the_nearer() {
+        let (score, timing) = eighths();
+        // Between A and B, nearer to A.
+        let hits = [0.0, 1.0, 2.4, 4.0, 5.0].map(|g| g * GAP);
+        let tracker = play(&score, &timing, &hits, 1.96);
+        assert_eq!(deviation(&tracker, &timing, 2).map(|d| (d * 10.0).round()), Some(4.0));
+        assert_eq!(deviation(&tracker, &timing, 3), None);
+    }
+
+    #[test]
+    fn nothing_shows_before_its_note_is_final() {
+        let (score, timing) = eighths();
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        let delay = 0.06;
+        let a = timing.total_loop_ticks() / 4;
+        // A (0.5 s) 0.6 of a gap late: the calibration gets its deviation
+        // from the nearest note at once, B's.
+        tracker.update_progress_behind(0.65, delay, &timing, &score);
+        let delta = tracker.record_hit(0.65, &timing, &score).unwrap();
+        assert!((delta + 100.0).abs() < 1e-6, "{delta}");
+        tracker.update_progress_behind(0.75, delay, &timing, &score);
+        tracker.record_hit(0.75, &timing, &score);
+        assert!(tracker.mark_for_onset(a).is_none());
+        assert_eq!(tracker.live_summary().map_or(0, |s| s.hits), 0);
+        // Final halfway between B and C (0.875 s), the delay behind.
+        tracker.update_progress_behind(0.875 + delay - 0.005, delay, &timing, &score);
+        assert!(tracker.mark_for_onset(a).is_none());
+        tracker.update_progress_behind(0.875 + delay + 0.005, delay, &timing, &score);
+        assert_eq!(deviation(&tracker, &timing, 2).map(|d| (d * 10.0).round()), Some(6.0));
+        assert_eq!(tracker.live_summary().map(|s| (s.hits, s.extra)), Some((1, 0)));
+    }
+
+    #[test]
+    fn at_a_slow_tempo_a_note_is_final_half_a_second_after_the_next() {
+        // Quarters at 40 BPM, 1.5 s apart: halfway would be 0.75 s.
+        let score = parse_score("4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 40);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        let a = timing.total_loop_ticks() / 4;
+        tracker.update_progress(1.6, &timing, &score);
+        tracker.record_hit(1.6, &timing, &score);
+        tracker.update_progress(3.0 + 0.49, &timing, &score);
+        assert!(tracker.mark_for_onset(a).is_none());
+        tracker.update_progress(3.0 + 0.51, &timing, &score);
+        assert!(matches!(tracker.mark_for_onset(a), Some(AccuracyMark::Hit { .. })));
+    }
+
+    #[test]
+    fn across_the_loop_end_as_inside_the_loop() {
+        let (score, timing) = eighths();
+        // The loop's last note 0.6 late, the next loop's first two on time.
+        let hits = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.6, 8.0, 9.0].map(|g| g * GAP);
+        // The next loop's first note is final at 2.375 s.
+        let tracker = play(&score, &timing, &hits, 2.45);
+        assert_eq!(deviation(&tracker, &timing, 7).map(|d| (d * 10.0).round()), Some(6.0));
+        assert_eq!(deviation(&tracker, &timing, 0), Some(0.0));
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (9, 0, 0));
+    }
+
+    #[test]
+    fn a_stop_aligns_the_open_stretch() {
+        let score = parse_score("4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        // Notes 0.5 s apart; nothing final before 0.75 s.
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        tracker.record_hit(0.52, &timing, &score);
+        tracker.update_progress(0.6, &timing, &score);
+        assert!(tracker.live_summary().is_none());
+        tracker.on_playback_stop();
+        let s = tracker.last_summary().unwrap();
+        // The third note's window was still open: no miss.
+        assert_eq!((s.hits, s.misses, s.extra), (2, 0, 0));
+        assert!(tracker.mark_for_onset(2 * timing.total_loop_ticks() / 4).is_none());
+
+        // The second note unplayed, its window closed at 1 s: missed.
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        tracker.update_progress(1.1, &timing, &score);
+        tracker.on_playback_stop();
+        let s = tracker.last_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, 1, 0));
+    }
+
+    #[test]
+    fn the_tallies_count_the_final_pairs() {
+        // A on 2, B on its "&": A 0.6 of a gap late, B on time.
+        let score = parse_score("2/4 r:q e e").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress(0.6, &timing, &score);
+        tracker.record_hit(0.5 + 0.15, &timing, &score);
+        tracker.record_hit(0.75, &timing, &score);
+        tracker.update_progress(0.9, &timing, &score);
+        tracker.on_playback_stop();
+        let [Some(voice), None] = tracker.last_voice_summaries() else {
+            panic!("the first voice played");
+        };
+        assert_eq!((voice.hits, voice.misses, voice.extra), (2, 0, 0));
+        let drift = tracker.last_drift().expect("two hits");
+        let deltas: Vec<f64> = drift.hits.iter().map(|h| h.delta_ms.round()).collect();
+        assert_eq!(deltas, [150.0, 0.0]);
+    }
+}
+
+/// The alignment on a kit runs per instrument.
+#[cfg(test)]
+mod kit_alignment_tests {
+    use super::*;
+    use Instrument::{HiHat, Kick};
+    use grooph_measure::notation::parse_score;
+
+    #[test]
+    fn a_late_hi_hat_counts_for_its_note_and_a_kick_takes_no_part() {
+        // Hi-hat eighths at 160 BPM, 187.5 ms apart; kicks on 1 and 3.
+        let score = parse_score("4/4 H-K:e H:e H:e H:e H-K:e H:e H:e H:e").unwrap();
+        let timing = ScoreTiming::from_score(&score, 160);
+        let gap = 0.1875;
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        let mut hits: Vec<(f64, Instrument)> =
+            [0.0, 1.0, 2.6, 3.0, 4.0, 5.0].iter().map(|g| (g * gap, HiHat)).collect();
+        // The kicks on time, and one more with A's late hit.
+        hits.extend([(0.0, Kick), (2.6 * gap, Kick), (4.0 * gap, Kick)]);
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut hits = hits.into_iter().peekable();
+        let mut now = 0.0;
+        while now < 1.2 {
+            now += 1.0 / 60.0;
+            while let Some((t, i)) = hits.next_if(|&(t, _)| t <= now) {
+                tracker.record_instrument_hit(t, i, &timing, &score);
+            }
+            tracker.update_progress(now, &timing, &score);
+        }
+        let eighth = timing.total_loop_ticks() / 8;
+        let deviation = |index: u64| match tracker.mark_for_head(index * eighth, HiHat) {
+            Some(AccuracyMark::Hit { diff_ticks, .. }) => {
+                (diff_ticks / eighth as f64 * 10.0).round()
+            }
+            _ => panic!("hi-hat {index} not hit"),
+        };
+        assert_eq!((deviation(2), deviation(3)), (6.0, 0.0));
+        let s = tracker.live_summary().unwrap();
+        // Hi-hats 1 to 5 and the first kick; the kick on A's hit is extra.
+        assert_eq!((s.hits, s.misses, s.extra), (6, 0, 1));
+    }
+}
+
+/// Cases from the review of #382.
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use grooph_measure::notation::parse_score;
+    use grooph_measure::swing::{Swing, SwingUnit};
+
+    use super::super::session::compute_global_beat_onsets;
+
+    #[test]
+    fn a_first_tap_a_little_late_counts_for_the_note_just_played() {
+        // Quarters at 120 BPM; the session starts at the cursor (0.52 s)
+        // when the first tap, on the note at 0.5 s, comes in.
+        let score = parse_score("4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, timing.seconds_to_global_tick(0.52));
+        tracker.record_hit(0.52, &timing, &score);
+        tracker.update_progress(0.6, &timing, &score);
+        tracker.update_progress(1.3, &timing, &score);
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, 0, 0));
+        assert!((s.mean_ms - 20.0).abs() < 1e-6, "{}", s.mean_ms);
+        // Unplayed, the note before the start is no miss.
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, timing.seconds_to_global_tick(0.52));
+        tracker.record_hit(1.0, &timing, &score);
+        tracker.update_progress(0.6, &timing, &score);
+        tracker.update_progress(1.8, &timing, &score);
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, 0, 0));
+    }
+
+    #[test]
+    fn a_hit_keeps_the_tempo_it_was_played_at() {
+        let score = parse_score("4/4 q q q q").unwrap();
+        let slow = ScoreTiming::from_score(&score, 120);
+        let fast = ScoreTiming::from_score(&score, 240);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress(0.5, &slow, &score);
+        // 40 ms late at 120 BPM, then the tempo doubles before it is final.
+        tracker.record_hit(0.54, &slow, &score);
+        tracker.update_progress(0.7, &fast, &score);
+        let s = tracker.live_summary().unwrap();
+        assert_eq!(s.hits, 1);
+        assert!((s.mean_ms - 40.0).abs() < 1e-6, "{}", s.mean_ms);
+    }
+
+    #[test]
+    fn a_dropped_bar_keeps_the_hit_of_its_open_last_note() {
+        // Two bars of quarters; the first bar's last note (1.5 s) played
+        // 100 ms late is final at 2.25 s, but Endless drops the bar at 2.1 s.
+        let score = parse_score("4/4 q q q q | 4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        for t in [0.0, 0.5, 1.0, 1.6, 2.0] {
+            tracker.update_progress(t, &timing, &score);
+            tracker.record_hit(t, &timing, &score);
+        }
+        tracker.update_progress(2.1, &timing, &score);
+        assert_eq!(tracker.live_summary().unwrap().hits, 3);
+        tracker.drop_leading_ticks(timing.measure_start_tick(1));
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (4, 0, 0));
+        assert!((s.mean_ms - 25.0).abs() < 1e-6, "{}", s.mean_ms);
+    }
+
+    #[test]
+    fn swung_notes_are_aligned_in_the_order_they_sound() {
+        // The swung "&" (¾ of a beat) sounds after the triplet's last note
+        // (⅔) of the other voice.
+        let score = parse_score("4/4 e e q h ; t8 t8 t8 q h").unwrap();
+        let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
+        let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
+        let beats = compute_global_beat_onsets(&score, &timing);
+        let mut sounds: Vec<f64> = beats
+            .iter()
+            .filter(|b| b.is_note)
+            .map(|b| timing.global_tick_to_seconds(b.performed_tick as f64))
+            .collect();
+        sounds.sort_by(f64::total_cmp);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        for &t in &sounds {
+            tracker.record_hit(t, &timing, &score);
+        }
+        tracker.update_progress(1.9, &timing, &score);
+        tracker.on_playback_stop();
+        let s = tracker.last_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (sounds.len() as u64, 0, 0));
+        assert!(s.spread_ms < 1e-6);
+    }
+
+    #[test]
+    fn notes_sounding_at_once_are_each_judged_once() {
+        // At 60 % swing the "&" and the quintuplet's third note both sound
+        // at 0.6 of a beat.
+        let score = parse_score("4/4 e e q h ; qt16 qt16 qt16 qt16 qt16 q h").unwrap();
+        let swing = Swing { unit: SwingUnit::Eighths, percent: 60 };
+        let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
+        let beats = compute_global_beat_onsets(&score, &timing);
+        let performed: Vec<u64> =
+            beats.iter().filter(|b| b.is_note).map(|b| b.performed_tick).collect();
+        let notes = performed.len() as u64;
+        let mut distinct = performed.clone();
+        distinct.dedup();
+        assert!(distinct.len() < performed.len(), "two notes sound at once");
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        let mut now = 0.0;
+        while now < 1.9 {
+            now += 1.0 / 60.0;
+            tracker.update_progress(now, &timing, &score);
+        }
+        tracker.on_playback_stop();
+        // Each note judged once; the half at 1 s, its window open until the
+        // next loop, is no miss at the stop.
+        let s = tracker.last_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, notes - 2, 0));
+    }
+
+    #[test]
+    fn a_pending_note_stays_when_swing_changes() {
+        // Eighths swung 75 %: the first "&" sounds at 0.375 s.
+        let score = parse_score("4/4 e e e e e e e e").unwrap();
+        let straight = ScoreTiming::from_score(&score, 120);
+        let swung = straight.clone().with_swing(Swing { unit: SwingUnit::Eighths, percent: 75 });
+        let and = straight.total_loop_ticks() / 8;
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &swung, &score);
+        // The downbeat is final at 0.4375 s, the "&" open.
+        tracker.update_progress(0.45, &swung, &score);
+        assert!(tracker.mark_for_onset(0).is_some());
+        assert!(tracker.mark_for_onset(and).is_none());
+        // Swing off: the "&" now sounds before where it sounded.
+        tracker.update_progress(1.0, &straight, &score);
+        assert!(matches!(tracker.mark_for_onset(and), Some(AccuracyMark::Miss)));
+    }
+
+    #[test]
+    fn a_miss_is_dated_at_the_tempo_it_was_due_at() {
+        // Two bars of quarters at 120 BPM; the note at 1.5 s goes unplayed
+        // and is final at 2.25 s, but the tempo doubles at 2 s.
+        let score = parse_score("4/4 q q q q | 4/4 q q q q").unwrap();
+        let slow = ScoreTiming::from_score(&score, 120);
+        let fast = ScoreTiming::from_score(&score, 240);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        let mut hits = [0.0, 0.5, 1.0].into_iter().peekable();
+        let mut now: f64 = 0.0;
+        while now < 2.0 {
+            now += 1.0 / 60.0;
+            while let Some(hit) = hits.next_if(|&h| h <= now) {
+                tracker.record_hit(hit, &slow, &score);
+            }
+            tracker.update_progress(now, &slow, &score);
+        }
+        // As a tempo change re-anchors the clock.
+        let tick = slow.seconds_to_global_tick(now);
+        tracker.realign_start_time(now - fast.global_tick_to_seconds(tick), tick);
+        while now < 2.5 {
+            now += 1.0 / 60.0;
+            tracker.update_progress(now, &fast, &score);
+        }
+        tracker.on_playback_stop();
+        let drift = tracker.last_drift().expect("three hits");
+        assert_eq!(drift.hits.len(), 3);
+        assert!(drift.misses.iter().any(|&t| (t - 1.5).abs() < 0.02), "{:?}", drift.misses);
     }
 }

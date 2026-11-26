@@ -1,3 +1,4 @@
+mod align;
 mod display;
 mod drift;
 mod positions;
