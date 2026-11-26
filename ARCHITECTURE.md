@@ -875,9 +875,15 @@ grooph's metronome runs inside AI chats as an
   tempos a gap plus 0.5 s), and nothing changes once shown. When the run
   stops, the open stretch is aligned with the hits in and the summary
   includes it; a note whose window is still open then and has no hit is no
-  miss. A lane starts at the session's origin (the cursor at the start, or
-  where marks were cleared); notes before it are not judged. Re-anchoring
-  the clock keeps the open stretch, whose notes and hits keep their ticks.
+  miss. A lane runs in the order its notes sound (swing can move a note
+  past one of another voice). It starts at its note at or before the
+  session's origin (the cursor at the start, or where marks were cleared):
+  a first hit a little late counts for it, but a note before the origin is
+  never missed. Re-anchoring the clock keeps the open stretch, whose notes
+  and hits keep their ticks; a hit keeps the tempo it was played at, so a
+  tempo change before its note is final does not change its deviation.
+  Before Endless drops a bar, its open notes are made final with the hits
+  in (`Until::Before`).
 - The calibration's measure stays the nearest note: `record_hit` returns
   each hit's deviation from it at once (on a kit within the catch window),
   whatever the alignment later makes of the hit.

@@ -6,7 +6,7 @@ use grooph_measure::{Instrument, Score};
 use super::drift::Drift;
 use super::positions::PositionTallies;
 use super::progress::update_progress;
-use super::recorder::{finalise, record_hit};
+use super::recorder::{Until, finalise, record_hit};
 use super::session::{
     AccuracyMark, ExtraMark, NoteKey, RecordingSession, RunSummary, TRACKED_VOICES, shift_extras,
     shift_marks,
@@ -100,7 +100,7 @@ impl AccuracyTracker {
     fn end_session(&mut self) {
         if let Some(data) = self.session.data_mut() {
             // The open stretch with the hits in, as far as it got.
-            finalise(data, true);
+            finalise(data, Until::Stop);
             data.bars.settle();
         }
         if let Some(data) = self.session.data()
@@ -1719,5 +1719,101 @@ mod kit_alignment_tests {
         let s = tracker.live_summary().unwrap();
         // Hi-hats 1 to 5 and the first kick; the kick on A's hit is extra.
         assert_eq!((s.hits, s.misses, s.extra), (6, 0, 1));
+    }
+}
+
+/// Cases from the review of #382.
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use grooph_measure::notation::parse_score;
+    use grooph_measure::swing::{Swing, SwingUnit};
+
+    use super::super::session::compute_global_beat_onsets;
+
+    #[test]
+    fn a_first_tap_a_little_late_counts_for_the_note_just_played() {
+        // Quarters at 120 BPM; the session starts at the cursor (0.52 s)
+        // when the first tap, on the note at 0.5 s, comes in.
+        let score = parse_score("4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, timing.seconds_to_global_tick(0.52));
+        tracker.record_hit(0.52, &timing, &score);
+        tracker.update_progress(0.6, &timing, &score);
+        tracker.update_progress(1.3, &timing, &score);
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, 0, 0));
+        assert!((s.mean_ms - 20.0).abs() < 1e-6, "{}", s.mean_ms);
+        // Unplayed, the note before the start is no miss.
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, timing.seconds_to_global_tick(0.52));
+        tracker.record_hit(1.0, &timing, &score);
+        tracker.update_progress(0.6, &timing, &score);
+        tracker.update_progress(1.8, &timing, &score);
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, 0, 0));
+    }
+
+    #[test]
+    fn a_hit_keeps_the_tempo_it_was_played_at() {
+        let score = parse_score("4/4 q q q q").unwrap();
+        let slow = ScoreTiming::from_score(&score, 120);
+        let fast = ScoreTiming::from_score(&score, 240);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress(0.5, &slow, &score);
+        // 40 ms late at 120 BPM, then the tempo doubles before it is final.
+        tracker.record_hit(0.54, &slow, &score);
+        tracker.update_progress(0.7, &fast, &score);
+        let s = tracker.live_summary().unwrap();
+        assert_eq!(s.hits, 1);
+        assert!((s.mean_ms - 40.0).abs() < 1e-6, "{}", s.mean_ms);
+    }
+
+    #[test]
+    fn a_dropped_bar_keeps_the_hit_of_its_open_last_note() {
+        // Two bars of quarters; the first bar's last note (1.5 s) played
+        // 100 ms late is final at 2.25 s, but Endless drops the bar at 2.1 s.
+        let score = parse_score("4/4 q q q q | 4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        for t in [0.0, 0.5, 1.0, 1.6, 2.0] {
+            tracker.update_progress(t, &timing, &score);
+            tracker.record_hit(t, &timing, &score);
+        }
+        tracker.update_progress(2.1, &timing, &score);
+        assert_eq!(tracker.live_summary().unwrap().hits, 3);
+        tracker.drop_leading_ticks(timing.measure_start_tick(1));
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (4, 0, 0));
+        assert!((s.mean_ms - 25.0).abs() < 1e-6, "{}", s.mean_ms);
+    }
+
+    #[test]
+    fn swung_notes_are_aligned_in_the_order_they_sound() {
+        // The swung "&" (¾ of a beat) sounds after the triplet's last note
+        // (⅔) of the other voice.
+        let score = parse_score("4/4 e e q h ; t8 t8 t8 q h").unwrap();
+        let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
+        let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
+        let beats = compute_global_beat_onsets(&score, &timing);
+        let mut sounds: Vec<f64> = beats
+            .iter()
+            .filter(|b| b.is_note)
+            .map(|b| timing.global_tick_to_seconds(b.performed_tick as f64))
+            .collect();
+        sounds.sort_by(f64::total_cmp);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        for &t in &sounds {
+            tracker.record_hit(t, &timing, &score);
+        }
+        tracker.update_progress(1.9, &timing, &score);
+        tracker.on_playback_stop();
+        let s = tracker.last_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (sounds.len() as u64, 0, 0));
+        assert!(s.spread_ms < 1e-6);
     }
 }

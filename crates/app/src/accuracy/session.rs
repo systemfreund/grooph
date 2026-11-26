@@ -10,6 +10,7 @@ use grooph_measure::{Instrument, MeasureIdx, Score, StaffKind};
 use super::align::Lanes;
 use super::drift::DriftLog;
 use super::positions::PositionLog;
+use super::recorder::{Until, finalise};
 
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
@@ -771,6 +772,9 @@ impl RecordingSession {
     /// keeping stats and counters. No-op when `Idle`.
     pub(super) fn drop_leading_ticks(&mut self, ticks: u64) {
         if let Self::Recording(d) = self {
+            // The open notes of the bars dropped go with what they have:
+            // their lookahead would have run into the bars after.
+            finalise(d, Until::Before(ticks));
             d.marks_by_onset = shift_marks(std::mem::take(&mut d.marks_by_onset), ticks);
             for lane in d.lanes.values_mut() {
                 lane.drop_leading_ticks(ticks);

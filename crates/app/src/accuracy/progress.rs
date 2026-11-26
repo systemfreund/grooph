@@ -1,7 +1,7 @@
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
-use super::recorder::{finalise, remember_played};
+use super::recorder::{Until, finalise, remember_played};
 use super::session::{RecordingData, global_beat_onsets, loop_offset};
 
 /// Advance the progress cursor to `delay_s` before `now_seconds` and make
@@ -74,7 +74,7 @@ pub(super) fn update_progress(
     }
     data.last_tick = Some(current_tick);
     data.cursor_s = now_seconds;
-    finalise(data, false);
+    finalise(data, Until::Cursor);
 }
 
 /// The extra hits of an earlier loop go once the cursor passes their place

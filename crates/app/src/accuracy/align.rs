@@ -32,6 +32,9 @@ pub(super) const LOOKAHEAD_CAP_MS: f64 = 500.0;
 /// timeline.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PendingHit {
+    /// Ticks per second where and when it was played: its deviation is
+    /// measured at that tempo.
+    pub tps: f64,
     /// The loop it was played in ([`super::session::RecordingData::loops`]).
     pub loop_idx: i64,
     /// Where on the loop, as heard (global ticks).
@@ -43,8 +46,8 @@ pub(super) struct PendingHit {
 /// The open stretch of one instrument.
 #[derive(Clone, Debug, Default)]
 pub(super) struct LaneState {
-    /// The first note not final yet: its loop and written onset. `None`
-    /// until the lane starts at the session's origin.
+    /// The first note not final yet: its loop and where it sounds (global
+    /// ticks). `None` until the lane starts at the session's origin.
     pub frontier: Option<(i64, u64)>,
     /// Where the last hit made final as a note's was played (loop, tick):
     /// a hit before it would cross that pair.
@@ -75,7 +78,7 @@ pub(super) type Lanes = HashMap<Instrument, LaneState>;
 /// The notes of one lane on the score as played now.
 pub(super) struct Lane<'a> {
     pub beats: &'a [GlobalBeatOnset],
-    /// Indices into `beats`, in order.
+    /// Indices into `beats`, in the order they sound.
     pub idx: Vec<usize>,
     pub total: f64,
     pub timing: &'a ScoreTiming,
@@ -98,9 +101,12 @@ impl<'a> Lane<'a> {
         timing: &'a ScoreTiming,
         staff: StaffKind,
     ) -> Self {
-        let idx = (0..beats.len())
+        let mut idx: Vec<usize> = (0..beats.len())
             .filter(|&i| beats[i].is_note && beats[i].instrument == instrument)
             .collect();
+        // In the order they sound: swing can move a written note past one
+        // of another voice (a swung "&" after a triplet's second note).
+        idx.sort_by_key(|&i| beats[i].performed_tick);
         Self { beats, idx, total, timing, staff }
     }
 
@@ -177,21 +183,15 @@ impl<'a> Lane<'a> {
         loop_idx * self.len() + j - 1
     }
 
-    /// The first occurrence in loop `loop_idx` written at or after `tick`.
+    /// The first occurrence in loop `loop_idx` sounding at or after `tick`.
     pub(super) fn first_from(&self, loop_idx: i64, tick: u64) -> i64 {
-        let j = self.idx.partition_point(|&i| self.beats[i].onset_tick < tick) as i64;
+        let j = self.idx.partition_point(|&i| self.beats[i].performed_tick < tick) as i64;
         loop_idx * self.len() + j
     }
 
-    /// The first occurrence heard at or after `x`.
-    pub(super) fn first_heard_from(&self, x: f64) -> i64 {
-        let n = self.at_or_before(x);
-        if self.tick(n) >= x { n } else { n + 1 }
-    }
-
-    /// The frontier's form of occurrence `n`: its loop and written onset.
+    /// The frontier's form of occurrence `n`: its loop and where it sounds.
     pub(super) fn key_of(&self, n: i64) -> (i64, u64) {
-        (self.loop_of(n), self.beats[self.beat(n)].onset_tick)
+        (self.loop_of(n), self.beats[self.beat(n)].performed_tick)
     }
 
     /// Whether a hit at `x` is a candidate for any occurrence from `from` on.
@@ -298,7 +298,6 @@ mod tests {
         assert_eq!(lane.tick(8), total);
         assert_eq!(lane.tick(-1), -gap);
         assert_eq!(lane.at_or_before(total + 0.5 * gap), 8);
-        assert_eq!(lane.first_heard_from(total + 0.5 * gap), 9);
         assert_eq!(lane.first_from(1, 0), 8);
         // Halfway between the next two notes.
         assert_eq!(lane.final_at(0), 1.5 * gap);

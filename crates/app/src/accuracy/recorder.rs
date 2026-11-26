@@ -61,7 +61,10 @@ pub(super) fn record_hit(
     // across the loop's end from it (judging with a delay).
     let loop_idx = data.loops
         + data.last_tick.map_or(0, |cursor| i64::from(loop_offset(cursor - hit_global, total)));
-    let hit = PendingHit { loop_idx, tick: hit_global, timestamp };
+    // Its deviation is measured at the tempo it was played at, also if the
+    // tempo changes before its note is final.
+    let tps = timing.ticks_per_sec_in_measure(timing.measure_at_global_tick(hit_global));
+    let hit = PendingHit { loop_idx, tick: hit_global, timestamp, tps };
     let played = instrument.unwrap_or(Instrument::Rhythm);
     let lane = Lane::new(&beats, played, total, timing, score.staff);
     if lane.is_empty() {
@@ -89,17 +92,26 @@ pub(super) fn record_hit(
 }
 
 /// The first open note of a lane, starting it at `origin` if it has not
-/// started yet. `None` while there is no origin.
+/// started yet: at the note at or before it, which a first hit played a
+/// little late may be for (see [`before_origin`]). `None` while there is no
+/// origin.
 fn frontier(state: &mut LaneState, lane: &Lane, origin: Option<(i64, f64)>) -> Option<i64> {
     let n = match state.frontier {
         Some((loop_idx, tick)) => lane.first_from(loop_idx, tick),
         None => {
             let (loop_idx, tick) = origin?;
-            lane.first_heard_from(lane.at(loop_idx, tick))
+            lane.at_or_before(lane.at(loop_idx, tick))
         }
     };
     state.frontier = Some(lane.key_of(n));
     Some(n)
+}
+
+/// Whether occurrence `n` of `lane` sounds before the session's `origin`: it
+/// counts if a hit is paired with it, but is never missed, as the run had
+/// not started when it was due.
+fn before_origin(lane: &Lane, n: i64, origin: Option<(i64, f64)>) -> bool {
+    origin.is_some_and(|(loop_idx, tick)| lane.tick(n) < lane.at(loop_idx, tick))
 }
 
 /// Keep the score being played for [`finalise`] at the run's stop.
@@ -115,13 +127,26 @@ pub(super) fn remember_played(
     data.played = Some(Played { beats: Rc::clone(beats), timing: timing.clone(), staff });
 }
 
-/// Make final what the progress cursor has passed: each lane's notes up to
-/// where their lookahead ([`Lane::final_at`]) lies behind the cursor, with
-/// the hits the alignment pairs them with, and the hits that no open note
-/// can take any more as extra. With `stop`, the run ends: the whole open
-/// stretch is aligned with the hits in, and a note whose window is still
-/// open without a hit is no miss.
-pub(super) fn finalise(data: &mut RecordingData, stop: bool) {
+/// How far [`finalise`] goes.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Until {
+    /// Up to the notes whose lookahead ([`Lane::final_at`]) lies behind the
+    /// progress cursor.
+    Cursor,
+    /// The run ends: the whole open stretch, aligned with the hits in.
+    Stop,
+    /// The score is about to lose this many ticks from its front: the open
+    /// notes there, aligned with the hits in.
+    Before(u64),
+}
+
+/// Make final what the progress cursor has passed (or what `until` says):
+/// each lane's notes, with the hits the alignment pairs them with, and the
+/// hits that no open note can take any more as extra. Short of the cursor's
+/// lookahead (a stop, a dropped bar), a note whose window is still open
+/// without a hit is no miss.
+pub(super) fn finalise(data: &mut RecordingData, until: Until) {
+    let stop = until != Until::Cursor;
     let Some(played) = data.played.take() else {
         return;
     };
@@ -142,7 +167,11 @@ pub(super) fn finalise(data: &mut RecordingData, stop: bool) {
         for instrument in instruments {
             let lane = Lane::new(&played.beats, instrument, total, &played.timing, played.staff);
             let mut state = data.lanes.remove(&instrument).unwrap_or_default();
-            finalise_lane(data, &mut state, &lane, cursor, stop);
+            let end = match until {
+                Until::Before(ticks) => data.loops as f64 * total + ticks as f64,
+                _ => f64::INFINITY,
+            };
+            finalise_lane(data, &mut state, &lane, cursor, stop, end);
             data.lanes.insert(instrument, state);
         }
     }
@@ -155,6 +184,7 @@ fn finalise_lane(
     lane: &Lane,
     cursor: f64,
     stop: bool,
+    end: f64,
 ) {
     let instrument = lane.beats[lane.idx[0]].instrument;
     let Some(mut n) = frontier(state, lane, data.origin) else {
@@ -163,6 +193,9 @@ fn finalise_lane(
     loop {
         let (_, after) = lane.window(n);
         let closed = lane.tick(n) + after < cursor;
+        if lane.tick(n) >= end {
+            break;
+        }
         if stop {
             if state.hits.is_empty() && !closed {
                 break;
@@ -182,6 +215,7 @@ fn finalise_lane(
                 push_hit(data, lane, n, hit, xs[i]);
                 state.floor = Some((hit.loop_idx, hit.tick));
             }
+            Decision::Miss if before_origin(lane, n, data.origin) => {}
             Decision::Miss if closed || !stop => push_miss(data, lane, n, cursor),
             Decision::Miss => {}
         }
@@ -202,10 +236,10 @@ fn finalise_lane(
 fn push_hit(data: &mut RecordingData, lane: &Lane, n: i64, hit: PendingHit, x: f64) {
     let beat = &lane.beats[lane.beat(n)];
     let diff_ticks = x - lane.tick(n);
-    // Convert tick delta to ms using the onset measure's local rate. Since
-    // |diff_ticks| stays within a gap, the choice of measure has negligible
-    // impact for cross-measure hits.
-    let tps = lane.tps(n);
+    // Convert tick delta to ms at the rate it was played at, in the hit's
+    // measure. Since |diff_ticks| stays within a gap, the choice of measure
+    // has negligible impact for cross-measure hits.
+    let tps = hit.tps;
     let delta_ms = if tps > 0.0 { (diff_ticks / tps) * 1000.0 } else { 0.0 };
     // When the note was due, for the bar it is in.
     let note_s = hit.timestamp - delta_ms / 1000.0;
