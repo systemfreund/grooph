@@ -269,11 +269,28 @@ spread across callers.
    beat, played the usual way, in the voice where it already is there, else
    where it is elsewhere in the measure, else voice 0 of a measure of one
    voice that holds notes, else the voice the score's `Voicing` writes it in
-   (`Measure::voice_for`), onto the beat sounding then
-   (`Score::cursor_in_voice`; a kit measure without that voice gets it,
-   `Measure::fill_voices`). A tap on a head there plays it with the
+   (`Measure::voice_for`; a kit measure without that voice gets it,
+   `Measure::fill_voices`), at the cursor's time: where a beat of that
+   voice starts then, on it; else `Measure::start_note` (`strike.rs`)
+   splits the rest or note sounding then, the note keeping its heads, marks
+   and sticking, and the new note starts at that time. The span from the
+   start of what was split to the end of the cursor's beat is written by
+   Clean up's rules (no ties, rests merged per beat), the rest of the voice
+   keeps its spelling; a time inside a tuplet of the cursor's voice gets
+   that tuplet over the same span, its slots rests but the new note's,
+   merged as Clean up does. Where nothing fits (triplets against
+   sixteenths, another tuplet there) the bar stays and a notice says so.
+   The tap, a voice the bar gets and the split are one undo step, and the
+   cursor goes onto the new note. A tap on a head starting there plays it with the
    instrument's next technique (`Instrument::techniques`), after the last it
-   takes it away; a long press (a right click, `Grooph::hold_instrument`)
+   takes it away. A note made a rest so, or by the key H, leaves its beat
+   written again as Clean up writes it (`VoiceBar::tidy_beat_of`: the note
+   before it lasts to the next one again, a tuplet of rests is a rest), and
+   the cursor keeps its time: in its voice where a beat starts then, else
+   in the lowest numbered other voice where one does, else on what sounds
+   then. Only heads starting at the cursor's time are at the cursor
+   (`heads_at_cursor`: the lit cells, the technique stepped, where marks go,
+   the long press), not notes that started earlier and still sound; a long press (a right click, `Grooph::hold_instrument`)
    moves the instrument's note at the cursor to the other voice
    (`switch_voice(true)`, without falling back to another head; without
    its head on the beat it only picks the instrument). The row is always the nine cells
@@ -281,8 +298,8 @@ spread across callers.
    as on the staff, with the technique's sign (`paint_instrument`), faded
    where there is none, its short name in bold (drawn twice, a pixel apart:
    egui's font has no bold face) and a dot per technique, the one played
-   lit. The cell shows as picked while the head is on the beat
-   (`heads_at_cursor`). The instrument tapped, or of a head tapped on the
+   lit. The cell shows as picked while the head starts at the cursor's
+   time (`heads_at_cursor`). The instrument tapped, or of a head tapped on the
    staff, is the picked one (`EditorState::instrument`; `Grooph::edit_instrument`
    gives it, or the staff's own on the one line, `Staff::instrument_or`):
    the note values write it on a rest. Marks go to the head they mean

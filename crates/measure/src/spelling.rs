@@ -197,6 +197,20 @@ fn push_rests(spans: &[Span], mut start: u32, end: u32, fine: &mut [bool], out: 
     }
 }
 
+/// The rest values Clean up writes for `start..end` (units), all of it
+/// inside `spans`.
+pub(crate) fn rests(spans: &[Span], start: u32, end: u32) -> Vec<Duration> {
+    let mut fine = vec![false; spans.len()];
+    let mut out = Vec::new();
+    push_rests(spans, start, end, &mut fine, &mut out);
+    out.into_iter()
+        .filter_map(|p| match p {
+            Piece::Rest(d) => Some(d),
+            _ => None,
+        })
+        .collect()
+}
+
 /// How long notes may be.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Lengths {

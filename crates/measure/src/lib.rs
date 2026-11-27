@@ -20,6 +20,7 @@ pub mod revoice;
 pub mod score;
 mod spelling;
 pub mod sticking;
+mod strike;
 pub mod swing;
 pub mod tap_tempo;
 pub mod tempo;
