@@ -569,3 +569,104 @@ mod tests {
         );
     }
 }
+
+/// Every tuplet the editor writes, of equal values or starting with a
+/// longer one, in the cursor's voice: a note fits at each of its times off
+/// the plain grid, over rests or a note sounding on, and starts there.
+#[cfg(test)]
+mod every_tuplet {
+    use crate::cleanup::unit_ticks;
+    use crate::duration::{Duration, TupletSpec};
+    use crate::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
+    use crate::grid::DEFAULT_GRID;
+    use crate::{Beat, Instrument, Measure, TimeSignature, VoiceBar};
+
+    #[test]
+    fn a_note_fits_at_every_time_of_every_tuplet() {
+        let ts = TimeSignature::FOUR_FOUR;
+        let spans = crate::spelling::meter_spans(ts).unwrap();
+        let whole = DEFAULT_GRID.ticks_per_measure(&ts);
+        let mut refused = vec![];
+        let mut tried = 0;
+        for spec in TUPLET_TOOLS {
+            for v in VALUE_BUTTONS {
+                let d = Duration::Tuplet(TupletSpec { base: v, ..spec });
+                if !DEFAULT_GRID.supports(&d) {
+                    continue;
+                }
+                let len = DEFAULT_GRID.ticks_of(&d).unwrap();
+                for k in 2..=spec.n as u32 * 2 {
+                    let span = k * len;
+                    let Some(base) = crate::tuplet::base_spanning(span, spec.m) else { continue };
+                    if span > whole || !span.is_multiple_of(unit_ticks()) {
+                        continue;
+                    }
+                    for mixed in [false, true] {
+                        // Mixed: the first note twice as long (`t4 t8`).
+                        let long = Duration::Tuplet(TupletSpec {
+                            base: match VALUE_BUTTONS.iter().position(|&x| x == v) {
+                                Some(0) | None if mixed => continue,
+                                Some(0) | None => v,
+                                Some(p) => VALUE_BUTTONS[p - 1],
+                            },
+                            ..spec
+                        });
+                        if mixed && (k < 3 || !DEFAULT_GRID.supports(&long)) {
+                            continue;
+                        }
+                        let mut beats: Vec<Beat> = match mixed {
+                            false => (0..k).map(|_| Beat::note_of(d, Instrument::HiHat)).collect(),
+                            true => std::iter::once(Beat::note_of(long, Instrument::HiHat))
+                                .chain((2..k).map(|_| Beat::note_of(d, Instrument::HiHat)))
+                                .collect(),
+                        };
+                        let starts: Vec<u32> = DEFAULT_GRID.compute_onset_ticks(&beats);
+                        crate::tuplet::mark_group(&mut beats, base);
+                        let rests = crate::spelling::rests(
+                            &spans,
+                            span / unit_ticks(),
+                            whole / unit_ticks(),
+                        );
+                        beats.extend(rests.into_iter().map(Beat::rest));
+                        let upper = VoiceBar::from_parts(beats, ts);
+                        for lower in ["r:q r:q r:h", "r:w", "K:h r:h", "K:q. r:e r:h"] {
+                            let mut m = Measure::new(ts);
+                            *m.voice_mut(0).unwrap() = upper.clone();
+                            let l =
+                                crate::notation::parse_score(&format!("kit 4/4 {lower}")).unwrap();
+                            let mut two = m.clone();
+                            two.fill_voices(2);
+                            *two.voice_mut(1).unwrap() = l.current(0).first_voice().clone();
+                            for &tick in &starts {
+                                if tick.is_multiple_of(unit_ticks()) {
+                                    continue;
+                                }
+                                tried += 1;
+                                match two.start_note(1, tick, Instrument::Kick, 0) {
+                                    None => refused.push(format!(
+                                        "{spec:?} {v:?} x{k} mixed={mixed} at {tick} below {lower}"
+                                    )),
+                                    Some(out) => {
+                                        let ok = out.head_onsets().iter().any(|o| {
+                                            o.voice == 1
+                                                && o.tick == tick
+                                                && o.head.instrument() == Instrument::Kick
+                                        });
+                                        let same =
+                                            out.head_onsets().len() == two.head_onsets().len() + 1;
+                                        if !ok || !same {
+                                            refused
+                                                .push(format!("WRONG {spec:?} {v:?} x{k} {lower}"));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(tried > 1000, "{tried} times tried");
+        assert!(refused.is_empty(), "{refused:#?}");
+    }
+}
