@@ -114,19 +114,20 @@ fn tuplet_beats(
     shortest: u32,
     spans: &[spelling::Span],
 ) -> Option<Vec<Beat>> {
-    // The slots: the longest value of the ratio, from the group's base
-    // down to its `shortest` in the cursor's voice, that every note starts
-    // on (a triplet sixteenth in a triplet of eighths gives sixteenth slots).
+    // The slots: the longest value of the ratio, two or more of them, no
+    // shorter than the group's `shortest` in the cursor's voice, that every
+    // note starts on (a triplet sixteenth in a triplet of eighths gives
+    // sixteenth slots; the base a group is marked with does not limit them).
     let fits = |d: &Duration| {
         DEFAULT_GRID.ticks_of(d).is_some_and(|len| {
             len >= shortest
+                && end - start >= 2 * len
                 && (end - start).is_multiple_of(len)
                 && notes.iter().all(|&(t, _)| (t - start).is_multiple_of(len))
         })
     };
     let slot = crate::grid::NOTE_VALUES
         .into_iter()
-        .skip_while(|&v| v != group.spec.base)
         .map(|base| Duration::Tuplet(TupletSpec { base, ..group.spec }))
         .filter(|d| DEFAULT_GRID.supports(d))
         .find(fits)?;
@@ -513,6 +514,12 @@ mod tests {
         assert_eq!(
             started(input, 0, 1, 1, Kick).unwrap(),
             "kit 4/4 [H:t16 H:t16 H:t8 H:t8] H:q H:h ; [r:t16 K:t4 r:t16] r:q r:h"
+        );
+        // Slots longer than the base the group is marked with.
+        let input = "kit 4/4 [H:st8 H:st8 H:st8] H:q H:h ; r:q r:q r:h";
+        assert_eq!(
+            started(input, 0, 1, 1, Kick).unwrap(),
+            "kit 4/4 [H:st8 H:st8 H:st8] H:q H:h ; [r:st8 K:6:4q] r:q r:h"
         );
         // Against sixteenths, quintuplets or another tuplet: no.
         let input = format!("kit 4/4 {triplets} ; K:s K:s K:s K:s r:q r:h");
