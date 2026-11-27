@@ -304,6 +304,9 @@ pub struct BarState {
     pub bar: u64,
     /// The gap click silences this bar.
     pub muted: bool,
+    /// Bars of one loop as of this bar (the loop range's, a new range's from
+    /// the barline it took over at): what a tempo ramp in loops counts.
+    pub loop_len: usize,
 }
 
 pub struct Audio {
@@ -971,7 +974,8 @@ impl MetronomeSource {
             return None;
         }
         let bar = self.tick_source.bars();
-        Some(BarState { bar, muted: self.gap.muted(&self.local_params.plan.gap, bar) })
+        let muted = self.gap.muted(&self.local_params.plan.gap, bar);
+        Some(BarState { bar, muted, loop_len: self.tick_source.loop_len() })
     }
 
     /// Ratio of the ramp tempo of the current bar to the score tempo.
@@ -1625,7 +1629,10 @@ mod tests {
                 }
                 let timing = &source.local_params.plan.timing;
                 let bar = timing.measure_at_global_tick(source.tick_source.cursor()) + 1;
+                let loop_len = timing.loop_bars().len();
                 let state = source.current_bar().unwrap();
+                // What the app's ramp counts, from the engine itself.
+                assert_eq!(state.loop_len, loop_len);
                 let bpm = (120.0 * source.tempo_scale()).round() as u32;
                 for _ in 0..8_000 {
                     source.next();

@@ -123,8 +123,8 @@ pub(crate) fn next_bar_tick(tick: f64, from: usize, timing: &ScoreTiming, bars: 
 
 /// The count-in after this frame: `Waiting` until the audio engine reports a
 /// negative position (or gives up after [`COUNT_IN_WAIT_TIMEOUT_S`]),
-/// `Active` while the latency-adjusted position is before the first
-/// downbeat, then `Off`.
+/// `Active` while it reports the count-in, `Heard` from when it left it
+/// until its first downbeat is heard (the output latency later), then `Off`.
 pub(crate) fn next_count_in(
     state: CountInState,
     now: f64,
@@ -146,16 +146,23 @@ pub(crate) fn next_count_in(
                 _ => CountInState::Waiting { since },
             }
         }
-        // Past the count-in the engine is at the loop's first downbeat (or
-        // on from it): heard once the latency has passed after it.
+        // Past the count-in the engine is at the loop's first downbeat, or a
+        // little on from it: that is heard the latency after it played.
         CountInState::Active => match audio_pos {
-            Some((tick, _)) if tick >= 0.0 && tick - latency_s * tps >= loop_start(timing) => {
-                CountInState::Off
+            Some((tick, _)) if tick >= 0.0 => {
+                let past = if tps > 0.0 { (tick - loop_start(timing)).max(0.0) / tps } else { 0.0 };
+                heard_at(now - past + latency_s, now)
             }
             // Busy engine (None) or still counting in: stay.
             _ => CountInState::Active,
         },
+        CountInState::Heard { at } => heard_at(at, now),
     }
+}
+
+/// `Heard` until `at`, then `Off`.
+fn heard_at(at: f64, now: f64) -> CountInState {
+    if now >= at { CountInState::Off } else { CountInState::Heard { at } }
 }
 
 #[cfg(test)]
@@ -295,10 +302,14 @@ mod tests {
         assert_eq!(next_count_in(waiting, 2.0, None, 0.0, &t), CountInState::Off);
         let active = CountInState::Active;
         assert_eq!(next_count_in(active, 0.0, None, 0.0, &t), CountInState::Active);
-        // With 0.5 s latency the downbeat is heard half a second of ticks later.
-        assert_eq!(next_count_in(active, 0.0, Some((0.0, 1)), 0.5, &t), CountInState::Active);
+        // With 0.5 s latency the downbeat is heard half a second later.
+        let leaving = next_count_in(active, 10.0, Some((0.0, 1)), 0.5, &t);
+        assert_eq!(leaving, CountInState::Heard { at: 10.5 });
+        assert_eq!(next_count_in(leaving, 10.4, Some((0.4 * tps, 1)), 0.5, &t), leaving);
+        assert_eq!(next_count_in(leaving, 10.5, None, 0.5, &t), CountInState::Off);
+        // Seen late, the engine already a little on: that much earlier.
         let heard = Some((0.5 * tps, 1));
-        assert_eq!(next_count_in(active, 0.0, heard, 0.5, &t), CountInState::Off);
+        assert_eq!(next_count_in(active, 10.0, heard, 0.5, &t), CountInState::Off);
     }
 
     #[test]
@@ -309,8 +320,21 @@ mod tests {
         let active = CountInState::Active;
         // The engine is at bar 3; with 0.5 s latency not yet heard.
         let at = |ticks: f64| Some((start + ticks, t.total_loop_ticks()));
-        assert_eq!(next_count_in(active, 0.0, at(10.0), 0.5, &t), CountInState::Active);
+        assert!(matches!(
+            next_count_in(active, 0.0, at(10.0), 0.5, &t),
+            CountInState::Heard { .. }
+        ));
         assert_eq!(next_count_in(active, 0.0, at(0.5 * tps), 0.5, &t), CountInState::Off);
+        // A loop shorter than the latency: the engine goes round it many
+        // times before the downbeat is heard, which still ends the wait.
+        let short = looping_of(2, 2, 2);
+        let wrapped = Some((short.loop_start_tick() as f64 + 1.0, short.total_loop_ticks()));
+        let leaving = next_count_in(active, 5.0, wrapped, 3.0, &short);
+        assert!(matches!(
+            next_count_in(leaving, 7.9, wrapped, 3.0, &short),
+            CountInState::Heard { .. }
+        ));
+        assert_eq!(next_count_in(leaving, 8.0, wrapped, 3.0, &short), CountInState::Off);
     }
 
     #[test]

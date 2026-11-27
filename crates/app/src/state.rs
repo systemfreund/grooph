@@ -52,6 +52,17 @@ pub(crate) enum CountInState {
     Waiting { since: f64 },
     /// Audio reports the count-in bar.
     Active,
+    /// The engine is past the count-in; its first downbeat is heard at
+    /// `at` (UI time), the output latency later. Timed, not read from the
+    /// engine's position, which may go round a loop shorter than the latency.
+    Heard { at: f64 },
+}
+
+impl CountInState {
+    /// The count-in bar is being heard: playing, or still on its way out.
+    pub(crate) fn counting(self) -> bool {
+        matches!(self, CountInState::Active | CountInState::Heard { .. })
+    }
 }
 
 /// Give up waiting for the audio engine to report a count-in after this long

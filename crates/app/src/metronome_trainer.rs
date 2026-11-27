@@ -18,9 +18,9 @@ impl Grooph {
         };
         let ramp = self.played_ramp();
         let bpm = self.played_bpm();
-        let bars = self.played_bars();
         let ramp_bpm = (playing && ramp.enabled).then(|| match bar {
-            Some(b) => ramp.bpm_for_bar(bpm, b.bar, bars),
+            // The loop's length as the engine counts it for that bar.
+            Some(b) => ramp.bpm_for_bar(bpm, b.bar, b.loop_len),
             None => bpm,
         });
         self.playback_ctl.playback.bar_muted = bar.is_some_and(|b| b.muted);
