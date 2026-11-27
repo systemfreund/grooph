@@ -89,6 +89,9 @@ pub(crate) struct RhythmDoc {
     /// The loop range: the bars that play and loop; `None` plays the whole
     /// score. Always inside the score. Not part of the library or links.
     range: Option<BarRange>,
+    /// The range last switched off, which the loop button brings back
+    /// (see [`Self::parked_range`]); `None` while one is set.
+    parked: Option<BarRange>,
     /// How often the user set, moved or switched off the range. A snapshot
     /// taken before the last of these leaves the range alone when it comes
     /// back (see [`Doc::restore`]).
@@ -106,6 +109,7 @@ impl RhythmDoc {
             dirty: false,
             active_pattern_id: None,
             range: None,
+            parked: None,
             range_changes: 0,
         }
     }
@@ -118,10 +122,29 @@ impl RhythmDoc {
     /// The user sets, moves or switches off the loop range (cut to the
     /// score): no undo step and no unsaved change, and undo leaves it as
     /// the user left it.
+    /// Switching it off keeps it (see [`Self::parked_range`]).
     pub(crate) fn set_range(&mut self, range: Option<BarRange>) {
         let range = range.map(|r| r.clamped(self.score.len()));
         if range != self.range {
+            self.parked = if range.is_none() { self.range } else { None };
             self.range = range;
+            self.range_changes += 1;
+        }
+    }
+
+    /// The range last switched off, cut to the score: the loop button
+    /// switches it on again. `None` while a range is set, and after another
+    /// score was opened or endless mode switched on.
+    pub(crate) fn parked_range(&self) -> Option<BarRange> {
+        self.parked.map(|r| r.clamped(self.score.len()))
+    }
+
+    /// Switch the range off and forget it too (endless mode); as
+    /// [`Self::set_range`], no undo step brings it back.
+    pub(crate) fn forget_range(&mut self) {
+        if self.range.is_some() || self.parked.is_some() {
+            self.range = None;
+            self.parked = None;
             self.range_changes += 1;
         }
     }
@@ -129,18 +152,25 @@ impl RhythmDoc {
     /// An edit moved or removed bars: the range follows its bars with
     /// `follow`, see [`BarRange::after_insert`]/[`BarRange::after_remove`].
     pub(crate) fn range_follows(&mut self, follow: impl FnOnce(BarRange) -> Option<BarRange>) {
-        self.range = self.range.and_then(follow).map(|r| r.clamped(self.score.len()));
+        let len = self.score.len();
+        match (self.range, self.parked) {
+            (Some(r), _) => self.range = follow(r).map(|r| r.clamped(len)),
+            (None, Some(r)) => self.parked = follow(r).map(|r| r.clamped(len)),
+            (None, None) => {}
+        }
     }
 
     /// The range of a saved document, as it loads (see `SavedDoc`).
-    pub(crate) fn load_range(&mut self, range: Option<BarRange>) {
+    pub(crate) fn load_range(&mut self, range: Option<BarRange>, parked: Option<BarRange>) {
         self.range = range.map(|r| r.clamped(self.score.len()));
+        self.parked = parked.filter(|_| self.range.is_none());
     }
 
     /// Another score was opened in the document (as one undo step): it
     /// has no range. Undo brings the old one back with the old score.
     pub(crate) fn drop_range(&mut self) {
         self.range = None;
+        self.parked = None;
     }
 }
 
@@ -171,6 +201,7 @@ impl Doc for RhythmDoc {
             cursor: self.cursor,
             meters: MetronomeBars::default(),
             range: self.range,
+            parked: self.parked,
             range_changes: self.range_changes,
         }
     }
@@ -183,6 +214,7 @@ impl Doc for RhythmDoc {
         self.cursor = snap.cursor;
         if snap.range_changes == self.range_changes {
             self.range = snap.range;
+            self.parked = snap.parked;
         }
         self.range = self.range.map(|r| r.clamped(self.score.len()));
     }

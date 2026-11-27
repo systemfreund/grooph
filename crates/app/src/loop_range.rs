@@ -77,14 +77,18 @@ impl Grooph {
     /// goes, and no undo brings it back.
     pub(crate) fn switch_endless_on(&mut self) {
         self.editor.generator.config.endless = true;
-        self.editor.docs.practice.set_range(None);
+        self.editor.docs.practice.forget_range();
     }
 
-    /// The loop button: on with every bar, or off.
+    /// The loop button: off, or on again with the range last switched off,
+    /// else with every bar.
     pub(crate) fn toggle_loop(&mut self) {
-        let range = match self.loop_range() {
+        let Some(doc) = self.editor.docs.rhythm(self.document()) else {
+            return;
+        };
+        let range = match doc.range() {
             Some(_) => None,
-            None => Some(BarRange::all(self.editor.doc().score().len())),
+            None => Some(doc.parked_range().unwrap_or(BarRange::all(doc.score.len()))),
         };
         self.set_loop_range(range);
     }
@@ -408,15 +412,43 @@ mod tests {
 
     #[test]
     fn the_loop_button_switches_every_bar_on_and_off() {
-        let mut app = score_tab(3, 1, 1);
-        app.set_loop_range(None);
+        let mut app = app();
+        app.select_tab(Tab::Score);
+        app.editor.docs.score.score = parse_score("4/4 q q q q | q q q q | q q q q").unwrap();
         app.toggle_loop();
         assert_eq!(range(&app), bars(1, 3));
         app.toggle_loop();
         assert_eq!(range(&app), None);
         // A score of one bar: the flags frame it.
-        let mut app = score_tab(1, 1, 1);
-        app.set_loop_range(None);
+        let mut app = self::app();
+        app.select_tab(Tab::Score);
+        app.editor.docs.score.score = parse_score("4/4 q q q q").unwrap();
+        app.toggle_loop();
+        assert_eq!(range(&app), bars(1, 1));
+    }
+
+    #[test]
+    fn the_loop_button_brings_the_last_range_back() {
+        let mut app = score_tab(8, 3, 5);
+        app.toggle_loop();
+        assert_eq!(range(&app), None);
+        app.toggle_loop();
+        assert_eq!(range(&app), bars(3, 5));
+        // Edits while it is off move it with its bars.
+        app.toggle_loop();
+        at_bar(&mut app, 1);
+        app.remove_current_measure();
+        app.toggle_loop();
+        assert_eq!(range(&app), bars(2, 4));
+        // Saved with the document while off.
+        app.toggle_loop();
+        let saved = saved_doc_of(&app.editor.docs.score);
+        let mut doc = saved_doc_ron(&saved, &app.editor.library).unwrap();
+        assert_eq!((doc.range(), doc.parked_range()), (None, bars(2, 4)));
+        doc.set_range(doc.parked_range());
+        assert_eq!(doc.range(), bars(2, 4));
+        // Another score forgets it: on again, every bar.
+        app.new_score(StaffKind::Line);
         app.toggle_loop();
         assert_eq!(range(&app), bars(1, 1));
     }
@@ -540,6 +572,8 @@ mod tests {
         assert!(!app.loop_offered());
         app.editor.generator.config.endless = false;
         assert_eq!(range(&app), None);
+        // Forgotten, not only switched off.
+        assert_eq!(app.editor.docs.practice.parked_range(), None);
     }
 
     #[test]

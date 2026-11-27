@@ -13,6 +13,8 @@ pub(crate) struct EditorSnapshot {
     /// A rhythm document's loop range, and how often the user had changed
     /// it then (see `RhythmDoc::restore`); `None` and 0 in the metronome.
     pub range: Option<BarRange>,
+    /// The range last switched off, see `RhythmDoc::parked_range`.
+    pub parked: Option<BarRange>,
     pub range_changes: u64,
 }
 
@@ -86,6 +88,7 @@ mod tests {
             cursor: Cursor::at(0, beat_idx),
             meters: MetronomeBars::default(),
             range: None,
+            parked: None,
             range_changes: 0,
         }
     }
@@ -177,6 +180,7 @@ mod tests {
             cursor: Cursor::start(),
             meters: MetronomeBars::default(),
             range: None,
+            parked: None,
             range_changes: 0,
         };
 
@@ -193,6 +197,7 @@ mod tests {
                 cursor: Cursor::start(),
                 meters: MetronomeBars::default(),
                 range: None,
+                parked: None,
                 range_changes: 0,
             })
             .unwrap();

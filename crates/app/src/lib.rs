@@ -147,6 +147,9 @@ pub(crate) struct SavedDoc {
     /// The loop range; not in the library or links. Written only when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     range: Option<BarRange>,
+    /// The range last switched off, which the loop button brings back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parked_range: Option<BarRange>,
 }
 
 impl Default for SavedDoc {
@@ -157,6 +160,7 @@ impl Default for SavedDoc {
             dirty: false,
             active_pattern_id: None,
             range: None,
+            parked_range: None,
         }
     }
 }
@@ -169,6 +173,7 @@ impl SavedDoc {
             dirty: doc.dirty,
             active_pattern_id: doc.active_pattern_id,
             range: doc.range(),
+            parked_range: doc.parked_range(),
         }
     }
 
@@ -188,7 +193,8 @@ impl SavedDoc {
         doc.dirty = self.dirty || undoubled;
         doc.active_pattern_id = self.active_pattern_id.filter(|id| library.contains(*id));
         // A range that does not fit the score reads as none.
-        doc.load_range(self.range.filter(|r| r.fits(doc.score.len())));
+        let fits = |r: &BarRange| r.fits(doc.score.len());
+        doc.load_range(self.range.filter(fits), self.parked_range.filter(fits));
         doc
     }
 }

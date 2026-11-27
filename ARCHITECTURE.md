@@ -411,7 +411,10 @@ spread across callers.
   calibration, endless mode or the embedded view.
 - The loop button (🔁, `Grooph::toggle_loop`) sits between play and share in
   both transport rows and next to play in the editor's bar, filled in the
-  accent colour while a range is set; it sets all bars or none. On the staff
+  accent colour while a range is set; it switches the range off, and on again
+  with the one last switched off (`RhythmDoc::parked_range`, moved by edits
+  with its bars, saved as `parked_range`, forgotten by another score and
+  endless mode), else with all bars. On the staff
   (`loop_range::loop_flags`, after the marks, before `staff_input`) a flag in
   the accent colour stands on the barline before `a` and after `b`, drawn over
   the space above the row; its grab area (`grab_rect`, 44 pt) over the top of

@@ -216,6 +216,7 @@ impl Doc for MetronomeDoc {
             cursor: self.cursor,
             meters: self.meters.clone(),
             range: None,
+            parked: None,
             range_changes: 0,
         }
     }
