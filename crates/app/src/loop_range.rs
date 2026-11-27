@@ -164,10 +164,10 @@ pub(crate) fn flag_after(range: BarRange, idx: MeasureIdx) -> bool {
     range.last() == idx || range.first() == idx + 1
 }
 /// The drawn flag's width and height (points).
-const FLAG_WIDTH: f32 = 12.0;
-const FLAG_HEIGHT: f32 = 9.0;
+const FLAG_WIDTH: f32 = 18.0;
+const FLAG_HEIGHT: f32 = 14.0;
 /// The line on the barline (points).
-const FLAG_LINE: f32 = 2.5;
+const FLAG_LINE: f32 = 4.0;
 
 impl LoopEnd {
     /// The bar of `range` the flag stands at.
