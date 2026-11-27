@@ -47,14 +47,8 @@ pub(crate) fn advance_tick(
         // approximation across time signature changes).
         let audio_m = timing.measure_at_global_tick(raw_audio_tick);
         let offset_ticks = latency_s * timing.ticks_per_sec_in_measure(audio_m);
-        // Back over the loop's start into its end; a bar outside the
-        // range (playing on into a new one) has no loop to go round.
-        let audio_tick = raw_audio_tick - offset_ticks;
-        let audio_tick = if timing.loop_bars().contains(audio_m) || audio_tick < 0.0 {
-            timing.wrap_tick(audio_tick)
-        } else {
-            audio_tick
-        };
+        let audio_tick =
+            heard_tick(raw_audio_tick, offset_ticks, audio_m, current_m, timing, next_loop);
 
         // Shortest way round the loop.
         let mut diff = audio_tick - next;
@@ -71,6 +65,36 @@ pub(crate) fn advance_tick(
         next += diff * AUDIO_NUDGE;
     }
     next_bar_tick(next, current_m, timing, next_loop)
+}
+
+/// Where the audio engine's position `delayed` (shifted back by the output
+/// latency from inside measure `audio_m`) is heard, the cursor being in
+/// `current_m`. Shifted back over the start of the engine's bar, it is
+/// still in the bar heard before, which the cursor has not left yet: the
+/// end of `current_m`. Once the cursor is in the engine's bar (or still
+/// counting in), the bar before is the one before it round `next_loop`, the
+/// engine's range (not `timing`'s, which may still hold the old one).
+fn heard_tick(
+    raw: f64,
+    offset: f64,
+    audio_m: usize,
+    current_m: usize,
+    timing: &ScoreTiming,
+    next_loop: BarRange,
+) -> f64 {
+    let delayed = raw - offset;
+    let bar_start = timing.measure_start_tick(audio_m) as f64;
+    if delayed >= bar_start {
+        return delayed;
+    }
+    // Counting in, the engine's position is negative: no bar was heard.
+    if raw >= 0.0 && current_m != audio_m {
+        let end = timing.measure_start_tick(current_m + 1) as f64;
+        return end - (bar_start - delayed);
+    }
+    let start = timing.measure_start_tick(next_loop.first()) as f64;
+    let len = timing.measure_start_tick(next_loop.last() + 1) as f64 - start;
+    if len <= 0.0 { delayed } else { start + (delayed - start).rem_euclid(len) }
 }
 
 /// The loop's first tick (0 for an empty timing).
@@ -122,8 +146,12 @@ pub(crate) fn next_count_in(
                 _ => CountInState::Waiting { since },
             }
         }
+        // Past the count-in the engine is at the loop's first downbeat (or
+        // on from it): heard once the latency has passed after it.
         CountInState::Active => match audio_pos {
-            Some((tick, _)) if tick - latency_s * tps >= 0.0 => CountInState::Off,
+            Some((tick, _)) if tick >= 0.0 && tick - latency_s * tps >= loop_start(timing) => {
+                CountInState::Off
+            }
             // Busy engine (None) or still counting in: stay.
             _ => CountInState::Active,
         },
@@ -202,8 +230,13 @@ mod tests {
 
     /// Four bars of 4/4 at 120 BPM with bars `a..=b` (from 1) looping.
     fn looping(a: usize, b: usize) -> ScoreTiming {
-        let score = Score::new(vec![Measure::new(TimeSignature::FOUR_FOUR); 4]);
-        ScoreTiming::from_score(&score, 120).with_loop(grooph_measure::BarRange::new(a - 1, b - 1))
+        looping_of(4, a, b)
+    }
+
+    /// `n` bars of 4/4 at 120 BPM with bars `a..=b` (from 1) looping.
+    fn looping_of(n: usize, a: usize, b: usize) -> ScoreTiming {
+        let score = Score::new(vec![Measure::new(TimeSignature::FOUR_FOUR); n]);
+        ScoreTiming::from_score(&score, 120).with_loop(BarRange::new(a - 1, b - 1))
     }
 
     #[test]
@@ -266,5 +299,35 @@ mod tests {
         assert_eq!(next_count_in(active, 0.0, Some((0.0, 1)), 0.5, &t), CountInState::Active);
         let heard = Some((0.5 * tps, 1));
         assert_eq!(next_count_in(active, 0.0, heard, 0.5, &t), CountInState::Off);
+    }
+
+    #[test]
+    fn a_count_in_into_a_range_ends_once_its_first_downbeat_is_heard() {
+        let t = looping(3, 4);
+        let tps = t.ticks_per_sec_in_measure(2);
+        let start = t.loop_start_tick() as f64;
+        let active = CountInState::Active;
+        // The engine is at bar 3; with 0.5 s latency not yet heard.
+        let at = |ticks: f64| Some((start + ticks, t.total_loop_ticks()));
+        assert_eq!(next_count_in(active, 0.0, at(10.0), 0.5, &t), CountInState::Active);
+        assert_eq!(next_count_in(active, 0.0, at(0.5 * tps), 0.5, &t), CountInState::Off);
+    }
+
+    #[test]
+    fn latency_back_over_a_barline_stays_in_the_bar_still_heard() {
+        // Bar 5 of 3..=6 plays when the range becomes 3..=5: the engine
+        // goes on to bar 3, the bar heard is still bar 5, never bar 6.
+        let old = looping_of(8, 3, 6);
+        let new = BarRange::new(2, 4).unwrap();
+        let tps = old.ticks_per_sec_in_measure(0);
+        let near_end_of_5 = old.measure_start_tick(5) as f64 - 0.05 * tps;
+        let engine = Some((old.measure_start_tick(2) as f64 + 0.05 * tps, old.total_loop_ticks()));
+        let next = advance_tick(near_end_of_5, 0.0, engine, 0.1, false, &old, new);
+        assert_eq!(old.measure_at_global_tick(next), 4, "{next}");
+        // Once the cursor is in bar 3 too, the bar before it is bar 5, the
+        // new range's last, not the old range's.
+        let in_3 = old.measure_start_tick(2) as f64 + 1.0;
+        let next = advance_tick(in_3, 0.0, engine, 0.2, false, &old, new);
+        assert_eq!(old.measure_at_global_tick(next), 4, "{next}");
     }
 }

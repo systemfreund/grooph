@@ -34,11 +34,14 @@ pub(crate) struct TickSource {
     count_in: Option<CountInProgress>,
     /// Bars started since the loop's first downbeat, across loops.
     bars: u64,
+    /// Bars of one loop, as of the bar playing: a new loop range's length
+    /// counts from the barline it takes over at.
+    loop_len: usize,
 }
 
 impl TickSource {
     pub(crate) fn new(sample_rate: u32) -> Self {
-        Self { cursor: 0.0, sample_rate, count_in: None, bars: 0 }
+        Self { cursor: 0.0, sample_rate, count_in: None, bars: 0, loop_len: 1 }
     }
 
     /// Cursor for display: global score tick, or a negative tick counting up
@@ -54,6 +57,12 @@ impl TickSource {
     /// (0 = first bar). Keeps counting across loops: the bars played.
     pub(crate) fn bars(&self) -> u64 {
         self.bars
+    }
+
+    /// Bars of one pass through the loop range the bar playing belongs to,
+    /// for a tempo ramp counted in loops.
+    pub(crate) fn loop_len(&self) -> usize {
+        self.loop_len
     }
 
     pub(crate) fn in_count_in(&self) -> bool {
@@ -72,6 +81,7 @@ impl TickSource {
     pub(crate) fn restart(&mut self, timing: &ScoreTiming, count_in: Option<&Arc<CountInPlan>>) {
         self.cursor = Self::loop_start(timing);
         self.bars = 0;
+        self.loop_len = timing.loop_bars().len();
         self.count_in = count_in
             .filter(|p| p.ticks > 0)
             .map(|plan| CountInProgress { plan: Arc::clone(plan), pos: 0.0 });
@@ -153,6 +163,7 @@ impl TickSource {
             // 2. [next_start, new_cursor)
             schedule.collect_in_range(next_start as u64, new_cursor, out);
             self.bars += 1;
+            self.loop_len = timing.loop_bars().len();
         } else {
             // [old_cursor, new_cursor)
             schedule.collect_in_range(old_cursor.ceil() as u64, new_cursor, out);

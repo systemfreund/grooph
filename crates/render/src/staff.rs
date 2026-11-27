@@ -211,8 +211,8 @@ pub fn beat_anchor_pos(
 /// - Phase 1: cursor lives in the currently playing measure
 ///   (`playback.0`). Returned as `(playback.0, x)`.
 /// - Phase 2 (end of the last note, see [`last_note_split`]): cursor lives in
-///   the next measure of `loop_bars`, the bars that play (after its last
-///   one, its first), entering from the left. Returned as that measure's
+///   the next measure if it is one of `loop_bars`, the bars that play, else
+///   their first, entering from the left. Returned as that measure's
 ///   index plus its entering X. A bar laid out past them (the editor's
 ///   ghost bar) is never entered.
 ///
@@ -229,7 +229,9 @@ pub fn current_cursor_x(
     }
 
     let active_placed = staff.placed(play_idx)?;
-    let next_idx = match play_idx + 1 < loop_bars.end {
+    // As the audio engine goes on: into the next bar if it plays, else to
+    // the first bar that does (`BarRange::next_bar`).
+    let next_idx = match loop_bars.contains(&(play_idx + 1)) {
         true => play_idx + 1,
         false => loop_bars.start,
     };
@@ -480,6 +482,9 @@ mod tests {
         assert_eq!(next(2, 1..3), 1);
         assert_eq!(next(1, 1..3), 2);
         assert_eq!(next(0, 1..3), 1);
+        // From a bar before a range that does not start right after it:
+        // straight to its first bar, as the audio jumps there.
+        assert_eq!(next(0, 2..4), 2);
     }
 
     #[test]

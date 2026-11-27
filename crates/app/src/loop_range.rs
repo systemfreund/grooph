@@ -598,8 +598,11 @@ mod tests {
         assert_eq!(app.playback_options().range, bars(3, 8));
         assert_eq!(app.score_timing().loop_bars(), bars(3, 6).unwrap());
         assert_eq!(app.next_loop(&timing), bars(3, 8).unwrap());
-        // Within bar 5 nothing changes.
+        // Within bar 5 nothing changes, also with a new tempo or a ramp's step.
         assert!(!app.cross_barline(in_bar_5, in_bar_5 + 100.0, &timing));
+        app.score_changed(ScoreChange::Tempo);
+        app.score_changed(ScoreChange::Timing);
+        assert_eq!(app.score_timing().loop_bars(), bars(3, 6).unwrap());
         // At the barline the new one is played.
         let in_bar_6 = timing.measure_start_tick(5) as f64 + 1.0;
         assert!(app.cross_barline(in_bar_5, in_bar_6, &timing));

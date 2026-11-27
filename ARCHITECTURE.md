@@ -395,12 +395,16 @@ spread across callers.
   the next barline, without a pause or count-in, playing on into it where it
   can. A plan with only a new range leaves the cursor alone. `bars()` counts
   the bars played, so the gap click counts them in the range and a ramp in
-  loops steps once per pass (`loop_bars().len()` bars). The app does the same
+  loops steps once per pass (`TickSource::loop_len`, the range's bars, a new
+  range's from the barline it takes over at). The app does the same
   with its cursor (`playback_clock::advance_tick`, `next_bar_tick`) and keeps
   the range still played until then (`loop_range::LoopPlayback::held`) for its
   timing (`Grooph::played_range`; the audio gets the document's,
   `audio_range`); when the cursor crosses the barline it reports
-  `ScoreChange::Range` (`cross_barline`). None in the metronome, a
+  `ScoreChange::Range` (`cross_barline`); a tempo change keeps the old range
+  until then. The output latency takes the position heard back over a
+  barline into the bar the cursor is still in (`playback_clock::heard_tick`),
+  and the count-in ends once `a`'s downbeat is heard. None in the metronome, a
   calibration, endless mode or the embedded view.
 - The loop button (🔁, `Grooph::toggle_loop`) sits between play and share in
   both transport rows and next to play in the editor's bar, filled in the

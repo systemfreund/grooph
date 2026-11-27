@@ -980,8 +980,9 @@ impl MetronomeSource {
         if !params.ramp.enabled || params.bpm == 0 || self.tick_source.in_count_in() {
             return 1.0;
         }
-        // A loop is one pass through the loop range.
-        let bars = params.timing.loop_bars().len();
+        // A loop is one pass through the loop range; a new range's from
+        // the barline it takes over at.
+        let bars = self.tick_source.loop_len();
         params.ramp.bpm_for_bar(params.bpm, self.tick_source.bars(), bars) as f64
             / params.bpm as f64
     }
@@ -1693,6 +1694,12 @@ mod tests {
         assert_eq!(source.tick_source.bars(), bars);
         let timing = &source.local_params.plan.timing;
         assert_eq!(timing.measure_at_global_tick(source.tick_source.cursor()), 4);
+        // The old range's length counts for a ramp in loops until the barline.
+        assert_eq!(source.tick_source.loop_len(), 4);
+        for _ in 0..8_000 {
+            source.next();
+        }
+        assert_eq!(source.tick_source.loop_len(), 6);
     }
 
     #[test]

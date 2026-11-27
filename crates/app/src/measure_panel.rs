@@ -636,7 +636,9 @@ impl Grooph {
                 StaffKind::Kit => MarkRow::on_kit(extra.instrument, marks.staff_space),
                 StaffKind::Line => {
                     // The row under the note it is placed from.
-                    let Some(anchor) = marks.point(extra.anchor_tick as f64) else {
+                    let Some(anchor) =
+                        marks.point(extra.anchor_tick as f64, extra.anchor_tick as f64)
+                    else {
                         continue;
                     };
                     let Some(note) = anchor.note() else {
@@ -645,7 +647,9 @@ impl Grooph {
                     MarkRow::under_line(note.staff_pos, marks.staff_space)
                 }
             };
-            let Some(at) = marks.point(extra.anchor_tick as f64 + extra.diff_ticks) else {
+            let Some(at) =
+                marks.point(extra.anchor_tick as f64, extra.anchor_tick as f64 + extra.diff_ticks)
+            else {
                 continue;
             };
             let center = egui::pos2(at.x, row.mid_y(at.bar));
@@ -1266,21 +1270,29 @@ impl MarkRow {
     }
 }
 
-/// Where the score-global written `tick`, taken round the loop, is drawn on
-/// `staff`, the layout of a score of `score_len` bars: before the score's
-/// first note at the end of its last bar, past a bar's end in the next bar,
-/// wherever that is laid out.
+/// Where the score-global written `tick`, a mark of the note at `note_tick`,
+/// taken round the loop, is drawn on `staff`, the layout of a score of
+/// `score_len` bars: before the loop's first note at the end of its last
+/// bar, past a bar's end in the next bar, wherever that is laid out. A note
+/// outside the loop range (marked before the range changed) has its marks
+/// taken round the whole score.
 fn staff_point<'a>(
     staff: &'a StaffLayout,
     score_len: usize,
     timing: &ScoreTiming,
+    note_tick: f64,
     tick: f64,
 ) -> Option<StaffPoint<'a>> {
-    let total = timing.total_loop_ticks() as f64;
-    if total <= 0.0 {
+    let total = timing.score_ticks() as f64;
+    if total <= 0.0 || timing.total_loop_ticks() == 0 {
         return None;
     }
-    let tick = tick.rem_euclid(total);
+    let note_bar = timing.measure_at_global_tick(note_tick.rem_euclid(total));
+    let tick = if timing.loop_bars().contains(note_bar) {
+        timing.wrap_tick(tick)
+    } else {
+        tick.rem_euclid(total)
+    };
     let m = timing.measure_at_global_tick(tick);
     let bar = staff
         .systems
@@ -1334,9 +1346,10 @@ struct MarkPainter<'a> {
 }
 
 impl MarkPainter<'_> {
-    /// Where the score-global written `tick` is drawn (see [`staff_point`]).
-    fn point(&self, tick: f64) -> Option<StaffPoint<'_>> {
-        staff_point(self.staff, self.score_len, self.timing, tick)
+    /// Where the score-global written `tick` of a mark of the note at
+    /// `note_tick` is drawn (see [`staff_point`]).
+    fn point(&self, note_tick: f64, tick: f64) -> Option<StaffPoint<'_>> {
+        staff_point(self.staff, self.score_len, self.timing, note_tick, tick)
     }
 
     /// The note's zero line, which a hit's mark is measured from.
@@ -1362,7 +1375,7 @@ impl MarkPainter<'_> {
         row: MarkRow,
         grade: HitGrade,
     ) {
-        let Some(at) = self.point(note_tick as f64 + diff_ticks) else {
+        let Some(at) = self.point(note_tick as f64, note_tick as f64 + diff_ticks) else {
             return;
         };
         let (painter, width, dark) = (self.painter, self.width, self.dark);
@@ -1572,7 +1585,7 @@ mod tests {
     fn a_tick_round_the_loop_is_drawn_in_its_bar() {
         let (score, timing, staff) = laid_out("4/4 q q q q | 4/4 q q q q");
         let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
-        let at = |tick: f64| staff_point(&staff, score.len(), &timing, tick).unwrap();
+        let at = |tick: f64| staff_point(&staff, score.len(), &timing, 0.0, tick).unwrap();
         // Before the first note: at the end of the last bar, past its last note.
         let early = at(-q / 4.0);
         assert_eq!(early.bar.measure_idx, 1);
@@ -1587,10 +1600,30 @@ mod tests {
     }
 
     #[test]
+    fn marks_go_round_the_loop_range_and_stay_on_notes_outside_it() {
+        let (score, timing, staff) =
+            laid_out("4/4 q q q q | 4/4 q q q q | 4/4 q q q q | 4/4 q q q q");
+        // Bars 2 and 3 loop.
+        let timing = timing.with_loop(grooph_measure::BarRange::new(1, 2));
+        let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
+        let bar_of = |note: f64, tick: f64| {
+            staff_point(&staff, score.len(), &timing, note, tick).unwrap().bar.measure_idx
+        };
+        // On time on bar 3's downbeat: in bar 3, not bar 1.
+        assert_eq!(bar_of(8.0 * q, 8.0 * q), 2);
+        // Early on bar 2's downbeat: at the end of bar 3, the range's last.
+        assert_eq!(bar_of(4.0 * q, 4.0 * q - q / 4.0), 2);
+        // Late on bar 3's last note, past the range's end: bar 2.
+        assert_eq!(bar_of(11.0 * q, 12.0 * q + q / 4.0), 1);
+        // A mark on bar 4, from before the range changed, stays there.
+        assert_eq!(bar_of(12.0 * q, 12.0 * q + q / 4.0), 3);
+    }
+
+    #[test]
     fn a_hit_in_another_bar_or_round_the_loop_crosses_the_edges() {
         let (score, timing, staff) = laid_out("4/4 q q q q | 4/4 q q q q");
         let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
-        let at = |tick: f64| staff_point(&staff, score.len(), &timing, tick).unwrap();
+        let at = |tick: f64| staff_point(&staff, score.len(), &timing, 0.0, tick).unwrap();
         let (first, second) = (bar(&staff, 0), bar(&staff, 1));
         let head = |b: &PlacedMeasure, i: usize| b.ticks.columns()[i].x;
         // Early on the score's first note: out at its bar's left, in at the
@@ -1627,7 +1660,7 @@ mod tests {
         let (score, timing, staff) = laid_out("4/4 q q q q");
         let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
         let only = bar(&staff, 0);
-        let at = staff_point(&staff, score.len(), &timing, -q / 4.0).unwrap();
+        let at = staff_point(&staff, score.len(), &timing, 0.0, -q / 4.0).unwrap();
         assert_eq!(at.bar.measure_idx, 0);
         assert_eq!(
             hit_path(only, only.ticks.columns()[0].x, &at, true),

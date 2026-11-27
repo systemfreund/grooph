@@ -59,8 +59,9 @@ impl Grooph {
     /// with `change`, which the caller has just made.
     pub(crate) fn score_changed(&mut self, change: ScoreChange) {
         // An edit, a new score or document plays the document's range at
-        // once; a range change takes it over itself.
-        if change != ScoreChange::Range {
+        // once; a range change takes it over itself, and a new tempo leaves
+        // the range still played until the next barline.
+        if !matches!(change, ScoreChange::Range | ScoreChange::Tempo | ScoreChange::Timing) {
             self.playback_ctl.loop_play.held = None;
         }
         match change {
