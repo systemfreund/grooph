@@ -34,6 +34,9 @@ pub(crate) enum ScoreChange {
     Timing,
     /// Another document is shown: what plays is another score.
     Switched,
+    /// The bars played go by a new loop range (see [`crate::loop_range`]):
+    /// the run goes on, from now on over the new range's notes.
+    Range,
 }
 
 /// Where a [`ScoreChange::Replaced`] score came from, which says whether it
@@ -55,6 +58,11 @@ impl Grooph {
     /// Bring accuracy, playback state, cursor and document flags in line
     /// with `change`, which the caller has just made.
     pub(crate) fn score_changed(&mut self, change: ScoreChange) {
+        // An edit, a new score or document plays the document's range at
+        // once; a range change takes it over itself.
+        if change != ScoreChange::Range {
+            self.playback_ctl.loop_play.held = None;
+        }
         match change {
             ScoreChange::Edited => {
                 self.playback_ctl.accuracy.tracker.clear_for_edit();
@@ -96,6 +104,10 @@ impl Grooph {
                 self.playback_ctl.playback.reset();
                 self.playback_ctl.accuracy.tracker.clear_for_edit();
             }
+            ScoreChange::Range => {
+                self.playback_ctl.accuracy.tracker.loop_changed();
+                self.realign_accuracy_clock();
+            }
         }
     }
 
@@ -110,6 +122,10 @@ impl Grooph {
         let snap = self.current_snapshot();
         self.editor.doc_mut().history_mut().push(snap);
         self.editor.doc_mut().edit_score(|s| *s = score);
+        // Another score has no loop range; undo brings the old one back.
+        if let Some(doc) = self.editor.rhythm_doc_mut() {
+            doc.drop_range();
+        }
         self.score_changed(ScoreChange::Replaced(origin));
     }
 
@@ -185,8 +201,7 @@ impl Grooph {
         // On the loop as it is now: a change that shortened it can leave
         // the cursor past its end until the next frame wraps it, which the
         // session would take for a wrap, judging the loop so far as missed.
-        let tick =
-            self.playback_ctl.playback.smooth_tick.rem_euclid(timing.total_loop_ticks() as f64);
+        let tick = timing.wrap_tick(self.playback_ctl.playback.smooth_tick);
         let start_time = clock::now_seconds() - timing.global_tick_to_seconds(tick);
         self.playback_ctl.accuracy.tracker.realign_start_time(start_time, tick);
     }

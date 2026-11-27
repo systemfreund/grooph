@@ -280,6 +280,8 @@ pub(crate) struct PlaybackController {
     pub(crate) midi: MidiState,
     pub(crate) mic: MicState,
     pub(crate) play_along: PlayAlongState,
+    /// The loop range still played after the document's changed.
+    pub(crate) loop_play: crate::loop_range::LoopPlayback,
 }
 
 /// UI shell state, one group per feature besides the mode and the platform
@@ -325,6 +327,8 @@ pub(crate) struct StaffView {
     pub(crate) touch_seen: bool,
     /// A finger is on the screen now.
     pub(crate) touching: bool,
+    /// A loop range's flag being dragged (see [`crate::loop_range`]).
+    pub(crate) loop_drag: Option<crate::loop_range::LoopDrag>,
 }
 
 impl Default for StaffView {
@@ -335,6 +339,7 @@ impl Default for StaffView {
             followed: Default::default(),
             touch_seen: crate::platform::finger_is_the_pointer(),
             touching: false,
+            loop_drag: None,
         }
     }
 }

@@ -516,6 +516,15 @@ fn round_button_at(
     resp
 }
 
+/// The loop button's place in a transport `row` of the view: between play
+/// (in the middle) and share (at the right end).
+fn loop_button_rect(row: Rect) -> Rect {
+    let play_right = row.center().x + PLAY_BUTTON_SIZE / 2.0;
+    let share_left = row.right() - TRANSPORT_SIDE_SIZE;
+    let x = (play_right + share_left) / 2.0;
+    Rect::from_center_size(pos2(x, row.center().y), Vec2::splat(TRANSPORT_SIDE_SIZE))
+}
+
 /// A side button in a transport `row`: at its left or right end, centered
 /// on the row's height.
 fn side_button_rect(row: Rect, left: bool) -> Rect {
@@ -1020,6 +1029,7 @@ impl Grooph {
         {
             self.toggle_playback();
         }
+        self.loop_button(ui, loop_button_rect(row), "score_loop");
         if round_button_at(
             ui,
             side_button_rect(row, false),
@@ -1458,6 +1468,9 @@ impl Grooph {
             self.toggle_playback();
         }
 
+        if self.loop_offered() {
+            self.loop_button(ui, loop_button_rect(row), "shell_loop");
+        }
         if round_button_at(
             ui,
             share_rect,
@@ -1472,6 +1485,32 @@ impl Grooph {
             self.share_link(ui);
         }
         roll
+    }
+
+    /// The loop button (🔁) in `rect`: switches the loop range on, over every
+    /// bar, and off again. Filled in the accent colour while a range is set.
+    fn loop_button(&mut self, ui: &mut Ui, rect: Rect, id: &'static str) {
+        let on = self.loop_range().is_some();
+        let (fill, color) = if on {
+            (ui.visuals().selection.bg_fill, ui.visuals().selection.stroke.color)
+        } else {
+            (ui.visuals().extreme_bg_color, ui.visuals().strong_text_color())
+        };
+        let hint = if on { "Stop looping these bars" } else { "Loop a range of bars" };
+        if round_button_at(ui, rect, Id::unique(id), fill, color, |painter, rect, color| {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "🔁",
+                FontId::proportional(22.0),
+                color,
+            );
+        })
+        .on_hover_text(hint)
+        .clicked()
+        {
+            self.toggle_loop();
+        }
     }
 
     /// One line above the transport buttons: the live timing score, the
@@ -1533,6 +1572,12 @@ impl Grooph {
                         .clicked()
                         {
                             self.toggle_playback();
+                        }
+                        if self.loop_offered() {
+                            ui.add_space(8.0);
+                            let (rect, _) = ui
+                                .allocate_exact_size(Vec2::splat(SIDE_BUTTON_SIZE), Sense::hover());
+                            self.loop_button(ui, rect, "editor_loop");
                         }
                         ui.add_space(8.0);
                         let size = self.bar_tool_buttons(ui);

@@ -3,6 +3,7 @@
 //! the previous state, so they can be tested without a UI or audio device.
 
 use crate::state::{COUNT_IN_WAIT_TIMEOUT_S, CountInState};
+use grooph_measure::BarRange;
 use grooph_measure::tempo::ScoreTiming;
 
 /// Audio engine position: global tick (negative during the count-in) and the
@@ -15,7 +16,13 @@ const AUDIO_NUDGE: f64 = 0.1;
 /// Cursor position (global ticks) `dt` seconds after `tick`: moves at the
 /// playing measure's rate, then follows the audio position (shifted back by
 /// `latency_s`), snapping when more than half a beat off and nudging
-/// otherwise. Held at 0 while `counting_in`; wraps at the end of the score.
+/// otherwise. Held on the loop's first downbeat while `counting_in`; at a
+/// barline it goes on into the next bar of the loop, as the audio engine
+/// does (see [`next_bar_tick`]), so it never leaves the loop range and
+/// does not jump when the range changes.
+/// `next_loop` is the range the next bar comes from at a barline (the
+/// document's, which the engine takes over there; see
+/// [`crate::loop_range`]), `timing`'s otherwise.
 pub(crate) fn advance_tick(
     tick: f64,
     dt: f64,
@@ -23,12 +30,12 @@ pub(crate) fn advance_tick(
     latency_s: f64,
     counting_in: bool,
     timing: &ScoreTiming,
+    next_loop: BarRange,
 ) -> f64 {
     if counting_in {
         // Hold the cursor on the first downbeat until the count-in bar is over.
-        return 0.0;
+        return loop_start(timing);
     }
-    let total = timing.total_loop_ticks() as f64;
     let current_m = timing.measure_at_global_tick(tick);
     let mut next = tick + timing.ticks_per_sec_in_measure(current_m) * dt;
 
@@ -40,7 +47,14 @@ pub(crate) fn advance_tick(
         // approximation across time signature changes).
         let audio_m = timing.measure_at_global_tick(raw_audio_tick);
         let offset_ticks = latency_s * timing.ticks_per_sec_in_measure(audio_m);
-        let audio_tick = (raw_audio_tick - offset_ticks).rem_euclid(audio_total);
+        // Back over the loop's start into its end; a bar outside the
+        // range (playing on into a new one) has no loop to go round.
+        let audio_tick = raw_audio_tick - offset_ticks;
+        let audio_tick = if timing.loop_bars().contains(audio_m) || audio_tick < 0.0 {
+            timing.wrap_tick(audio_tick)
+        } else {
+            audio_tick
+        };
 
         // Shortest way round the loop.
         let mut diff = audio_tick - next;
@@ -52,13 +66,35 @@ pub(crate) fn advance_tick(
 
         let half_beat = timing.ticks_per_beat_in_measure(audio_m) as f64 * 0.5;
         if diff.abs() > half_beat {
-            next = audio_tick;
-        } else {
-            next += diff * AUDIO_NUDGE;
+            return audio_tick;
         }
+        next += diff * AUDIO_NUDGE;
     }
+    next_bar_tick(next, current_m, timing, next_loop)
+}
 
-    if total > 0.0 { next.rem_euclid(total) } else { next }
+/// The loop's first tick (0 for an empty timing).
+pub(crate) fn loop_start(timing: &ScoreTiming) -> f64 {
+    if timing.measure_count() == 0 { 0.0 } else { timing.loop_start_tick() as f64 }
+}
+
+/// `tick`, reached from inside measure `from`, carried past `from`'s end
+/// into the bar that plays next with `bars` looping (see
+/// [`BarRange::next_bar`]).
+pub(crate) fn next_bar_tick(tick: f64, from: usize, timing: &ScoreTiming, bars: BarRange) -> f64 {
+    let n = timing.measure_count();
+    if n == 0 {
+        return tick;
+    }
+    let from = from.min(n - 1);
+    let end = timing.measure_start_tick(from + 1) as f64;
+    if tick < end {
+        return tick;
+    }
+    let next = bars.next_bar(from, n);
+    // Never past the next bar's end, also after a long frame.
+    let into = (tick - end).min(timing.ticks_per_measure(next) as f64 - 1e-6).max(0.0);
+    timing.measure_start_tick(next) as f64 + into
 }
 
 /// The count-in after this frame: `Waiting` until the audio engine reports a
@@ -72,7 +108,10 @@ pub(crate) fn next_count_in(
     latency_s: f64,
     timing: &ScoreTiming,
 ) -> CountInState {
-    let tps = if timing.measure_count() > 0 { timing.ticks_per_sec_in_measure(0) } else { 0.0 };
+    // The count-in runs at the tempo of the loop's first bar.
+    let first = timing.loop_bars().first();
+    let tps =
+        if timing.measure_count() > first { timing.ticks_per_sec_in_measure(first) } else { 0.0 };
     match state {
         CountInState::Off => CountInState::Off,
         CountInState::Waiting { since } => {
@@ -108,7 +147,7 @@ mod tests {
     fn without_audio_the_cursor_runs_at_the_tempo() {
         let t = timing();
         let tps = t.ticks_per_sec_in_measure(0);
-        assert_eq!(advance_tick(0.0, 0.5, None, 0.0, false, &t), tps * 0.5);
+        assert_eq!(advance_tick(0.0, 0.5, None, 0.0, false, &t, t.loop_bars()), tps * 0.5);
     }
 
     #[test]
@@ -116,7 +155,7 @@ mod tests {
         let t = timing();
         let total = t.total_loop_ticks() as f64;
         let tps = t.ticks_per_sec_in_measure(1);
-        let next = advance_tick(total - 1.0, 1.0 / tps * 3.0, None, 0.0, false, &t);
+        let next = advance_tick(total - 1.0, 1.0 / tps * 3.0, None, 0.0, false, &t, t.loop_bars());
         assert!((next - 2.0).abs() < 1e-6, "{next}");
     }
 
@@ -126,10 +165,10 @@ mod tests {
         let total = t.total_loop_ticks();
         let tpb = t.ticks_per_beat_in_measure(0) as f64;
         // A tenth of a beat ahead: close a tenth of the gap.
-        let near = advance_tick(0.0, 0.0, Some((tpb * 0.1, total)), 0.0, false, &t);
+        let near = advance_tick(0.0, 0.0, Some((tpb * 0.1, total)), 0.0, false, &t, t.loop_bars());
         assert!((near - tpb * 0.01).abs() < 1e-6, "{near}");
         // A beat ahead: jump there.
-        assert_eq!(advance_tick(0.0, 0.0, Some((tpb, total)), 0.0, false, &t), tpb);
+        assert_eq!(advance_tick(0.0, 0.0, Some((tpb, total)), 0.0, false, &t, t.loop_bars()), tpb);
     }
 
     #[test]
@@ -139,7 +178,7 @@ mod tests {
         let tps = t.ticks_per_sec_in_measure(0);
         let tpb = t.ticks_per_beat_in_measure(0) as f64;
         // Audio two beats in, half a second of latency (one beat at 120 BPM).
-        let next = advance_tick(0.0, 0.0, Some((2.0 * tpb, total)), 0.5, false, &t);
+        let next = advance_tick(0.0, 0.0, Some((2.0 * tpb, total)), 0.5, false, &t, t.loop_bars());
         assert!((next - (2.0 * tpb - 0.5 * tps)).abs() < 1e-6, "{next}");
     }
 
@@ -149,7 +188,8 @@ mod tests {
         let total = t.total_loop_ticks();
         let tpb = t.ticks_per_beat_in_measure(0) as f64;
         let near_end = total as f64 - tpb * 0.1;
-        let next = advance_tick(near_end, 0.0, Some((tpb * 0.1, total)), 0.0, false, &t);
+        let next =
+            advance_tick(near_end, 0.0, Some((tpb * 0.1, total)), 0.0, false, &t, t.loop_bars());
         // Nudged forward across the wrap, not dragged back through the score.
         assert!(next > near_end, "{next}");
     }
@@ -157,7 +197,59 @@ mod tests {
     #[test]
     fn counting_in_holds_the_cursor() {
         let t = timing();
-        assert_eq!(advance_tick(500.0, 0.1, Some((-10.0, 1)), 0.0, true, &t), 0.0);
+        assert_eq!(advance_tick(500.0, 0.1, Some((-10.0, 1)), 0.0, true, &t, t.loop_bars()), 0.0);
+    }
+
+    /// Four bars of 4/4 at 120 BPM with bars `a..=b` (from 1) looping.
+    fn looping(a: usize, b: usize) -> ScoreTiming {
+        let score = Score::new(vec![Measure::new(TimeSignature::FOUR_FOUR); 4]);
+        ScoreTiming::from_score(&score, 120).with_loop(grooph_measure::BarRange::new(a - 1, b - 1))
+    }
+
+    #[test]
+    fn the_cursor_goes_round_the_loop_range() {
+        let t = looping(2, 3);
+        let tps = t.ticks_per_sec_in_measure(0);
+        let start = t.measure_start_tick(1) as f64;
+        assert_eq!(advance_tick(900.0, 0.1, None, 0.0, true, &t, t.loop_bars()), start);
+        // From the end of bar 3 into bar 2, never bar 4.
+        let end = t.measure_start_tick(3) as f64;
+        let next = advance_tick(end - 1.0, 3.0 / tps, None, 0.0, false, &t, t.loop_bars());
+        assert!((next - (start + 2.0)).abs() < 1e-6, "{next}");
+        // Audio just past the loop's start, latency taking it back before it:
+        // the end of the loop, not bar 1.
+        let total = t.total_loop_ticks();
+        let next = advance_tick(
+            end - 10.0,
+            0.0,
+            Some((start + 1.0, total)),
+            0.25,
+            false,
+            &t,
+            t.loop_bars(),
+        );
+        assert!(next > t.measure_start_tick(2) as f64 && next < end, "{next}");
+    }
+
+    #[test]
+    fn a_cursor_outside_a_new_range_plays_its_bar_to_the_end() {
+        // Bar 1 plays when the range becomes 3..=4: on to its end, then 3.
+        let t = looping(3, 4);
+        let tps = t.ticks_per_sec_in_measure(0);
+        let in_bar_1 = 100.0;
+        assert_eq!(
+            advance_tick(in_bar_1, 0.5, None, 0.0, false, &t, t.loop_bars()),
+            in_bar_1 + 0.5 * tps
+        );
+        let bar_2 = t.measure_start_tick(1) as f64;
+        let next = advance_tick(bar_2 - 1.0, 3.0 / tps, None, 0.0, false, &t, t.loop_bars());
+        assert!((next - (t.measure_start_tick(2) as f64 + 2.0)).abs() < 1e-6, "{next}");
+        // The audio playing there too keeps the cursor where it is.
+        let total = t.total_loop_ticks();
+        assert_eq!(
+            advance_tick(in_bar_1, 0.0, Some((in_bar_1, total)), 0.0, false, &t, t.loop_bars()),
+            in_bar_1
+        );
     }
 
     #[test]

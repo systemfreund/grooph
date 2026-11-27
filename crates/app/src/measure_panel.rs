@@ -169,7 +169,17 @@ impl Grooph {
         let render_opts = staff_opts.rescaled(staff.scale);
         self.ui.staff.em = render_opts.em;
 
-        follow_playback(ui, &mut self.playback_ctl.playback, &shown, &staff, &frame, view);
+        // The bars the cursor goes round: the next bar after the last comes
+        // from the range the audio engine plays.
+        let loop_bars = self.next_loop(&frame.timing).bars();
+        follow_playback(
+            ui,
+            &mut self.playback_ctl.playback,
+            loop_bars.clone(),
+            &staff,
+            &frame,
+            view,
+        );
         let cursor = self.editor.doc().cursor();
         let editing = edit && self.playback_ctl.transport_state == TransportState::Stopped;
         follow_edit_cursor(ui, &staff, cursor, editing, view, &mut self.ui.staff.followed);
@@ -181,14 +191,18 @@ impl Grooph {
         let ghost_rect = shown.ghost_rect(&staff);
         let with_ring = metronome && !edit;
         let lit = hover_with_ring(ui, &resp, &staff, with_ring, &mut self.editor.metronome);
-        let staff_view = StaffView { shown: &shown, staff: &staff, render_opts: &render_opts };
+        let staff_view =
+            StaffView { shown: &shown, staff: &staff, render_opts: &render_opts, loop_bars };
         self.draw_staff_view(ui, &staff_view, &frame, rect, &resp, lit, ghost_rect);
         let bar_action = (edit && !calibrating)
             .then(|| self.bar_menu(ui, &resp, &staff, cursor.measure_idx))
             .flatten();
         self.draw_playing_marks(ui, &staff_view, &frame);
+        let flags_taken = self.loop_flags(ui, &staff, render_opts.em);
 
-        self.staff_input(ui, resp, &staff, with_ring, ghost_rect);
+        if !flags_taken {
+            self.staff_input(ui, resp, &staff, with_ring, ghost_rect);
+        }
         self.apply_bar_action(bar_action);
     }
 
@@ -198,14 +212,15 @@ impl Grooph {
     fn panel_frame(&mut self, ui: &egui::Ui) -> PanelFrame {
         // Build the multi-measure tempo backbone once per frame.
         // O(score.len()) — cheap for realistic score sizes.
-        let timing = self.score_timing();
-
         // Update playback smoothing & primary-beat flash state
-        let playback_tick_to_draw = match self.playback_ctl.transport_state {
-            TransportState::Playing => Some(self.advance_playback(ui, &timing)),
+        let (playback_tick_to_draw, timing) = match self.playback_ctl.transport_state {
+            TransportState::Playing => {
+                let (tick, timing) = self.advance_playback(ui);
+                (Some(tick), timing)
+            }
             TransportState::Stopped => {
                 self.playback_ctl.playback.reset();
-                None
+                (None, self.score_timing())
             }
         };
 
@@ -256,7 +271,7 @@ impl Grooph {
             cursor,
             lit,
             playback: frame.playing,
-            loop_bars: 0..view.shown.played.len(),
+            loop_bars: view.loop_bars.clone(),
             marks,
             faded: silence.faded,
             ..RenderContext::new(view.shown.score(), view.staff, view.render_opts)
@@ -311,7 +326,11 @@ impl Grooph {
         }
         resp.context_menu(|ui| menu.items(ui, &mut bar_action));
         if let Some(placed) = staff.placed(cursor_bar) {
-            let chip = bar_menu_chip(ui, placed.rect);
+            // Clear of a loop flag's grab area on its right barline.
+            let flag =
+                self.shown_loop().is_some_and(|r| crate::loop_range::flag_after(r, cursor_bar));
+            let shift = if flag { crate::loop_range::FLAG_GRAB / 2.0 + 6.0 } else { 0.0 };
+            let chip = bar_menu_chip(ui, placed.rect.with_max_x(placed.rect.right() - shift));
             egui::Popup::menu(&chip).show(|ui| menu.items(ui, &mut bar_action));
         }
         bar_action
@@ -321,7 +340,17 @@ impl Grooph {
     /// chip: the veil on a bar the gap click silences, and the accuracy
     /// marks.
     fn draw_playing_marks(&self, ui: &egui::Ui, view: &StaffView, frame: &PanelFrame) {
+        // Bars outside the loop range never play: their veil, never the
+        // gap click's. The ghost bar is drawn as it is.
+        let range = self.shown_loop();
+        let outside = |idx: MeasureIdx| range.is_some_and(|r| !r.contains(idx));
+        for idx in (0..view.shown.played.len()).filter(|&i| outside(i)) {
+            if let Some(placed) = view.staff.placed(idx) {
+                crate::loop_range::draw_outside_bar(ui, placed.rect);
+            }
+        }
         if let Some(m_idx) = StaffSilence::of(&self.playback_ctl.playback, frame.playing).veiled
+            && !outside(m_idx)
             && let Some(placed) = view.staff.placed(m_idx)
         {
             draw_muted_bar(ui, placed.rect);
@@ -383,8 +412,7 @@ impl Grooph {
     pub(super) fn advance_unseen_playback(&mut self, ui: &egui::Ui) {
         match self.playback_ctl.transport_state {
             TransportState::Playing => {
-                let timing = self.score_timing();
-                let tick = self.advance_playback(ui, &timing);
+                let (tick, timing) = self.advance_playback(ui);
                 // Nothing is on screen: every bar before the playing one is
                 // out of view, so endless mode drops them as it goes.
                 self.playback_ctl.playback.rows_above_view = timing.to_local(tick).0;
@@ -395,8 +423,11 @@ impl Grooph {
 
     /// Move the playback cursor to this frame (see [`advance_tick`]), track
     /// the count-in and fire the primary-beat flash. Returns the cursor's
-    /// global tick.
-    fn advance_playback(&mut self, ui: &egui::Ui, timing: &ScoreTiming) -> f64 {
+    /// global tick and the timing it plays in (with the loop range taken
+    /// over at a barline it crossed, see [`crate::loop_range`]).
+    fn advance_playback(&mut self, ui: &egui::Ui) -> (f64, ScoreTiming) {
+        let mut timing = self.score_timing();
+        let next_loop = self.next_loop(&timing);
         let now = ui.input(|i| i.time);
         let latency_s = self.playback_ctl.devices.latency_s();
         let audio = self.playback_ctl.audio.as_ref();
@@ -408,23 +439,26 @@ impl Grooph {
             playback.waited_for_output = true;
             // Frames go on, so the wait ends (and the watchdog runs).
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
-            return playback.smooth_tick;
+            return (playback.smooth_tick, timing);
         }
         let audio_pos = audio.and_then(|audio| audio.playback_position());
         let dt = now - playback.last_update.unwrap_or(now);
         playback.last_update = Some(now);
 
         let was_counting_in = playback.counting_in();
-        playback.count_in = next_count_in(playback.count_in, now, audio_pos, latency_s, timing);
+        playback.count_in = next_count_in(playback.count_in, now, audio_pos, latency_s, &timing);
         let counting_in = playback.counting_in();
-        let tick =
-            advance_tick(playback.smooth_tick, dt, audio_pos, latency_s, counting_in, timing);
+        let before = playback.smooth_tick;
+        let tick = advance_tick(before, dt, audio_pos, latency_s, counting_in, &timing, next_loop);
         playback.smooth_tick = tick;
         // Its own clock: taking over `tick` after the count-in would jump
         // back, as `tick` starts the score from the downbeat.
         playback.heard_tick =
-            advance_tick(playback.heard_tick, dt, audio_pos, latency_s, false, timing);
+            advance_tick(playback.heard_tick, dt, audio_pos, latency_s, false, &timing, next_loop);
         let waited = std::mem::take(&mut playback.waited_for_output);
+        if !counting_in && self.cross_barline(before, tick, &timing) {
+            timing = self.score_timing();
+        }
         if (was_counting_in || waited) && !counting_in {
             self.realign_accuracy_clock();
         }
@@ -447,7 +481,7 @@ impl Grooph {
 
         // Keep the animation running.
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
-        tick
+        (tick, timing)
     }
 
     /// Whether the staff shows accuracy marks: while calibrating, and
@@ -776,6 +810,9 @@ struct StaffView<'a> {
     shown: &'a ShownScore<'a>,
     staff: &'a StaffLayout,
     render_opts: &'a StaffOpts,
+    /// The bars the playback cursor goes round (see
+    /// [`RenderContext::loop_bars`]).
+    loop_bars: std::ops::Range<MeasureIdx>,
 }
 
 /// Step 2: `score` laid out with `opts`, and the options it was laid out
@@ -828,7 +865,7 @@ fn playing_row_offset(row: Rect, content_height: f32, view: ScrollView) -> f32 {
 fn follow_playback(
     ui: &egui::Ui,
     playback: &mut PlaybackState,
-    shown: &ShownScore,
+    loop_bars: std::ops::Range<MeasureIdx>,
     staff: &StaffLayout,
     frame: &PanelFrame,
     view: ScrollView,
@@ -838,9 +875,7 @@ fn follow_playback(
     // the shared helper to find the cursor's actual home measure
     // and X for this frame.
     let Some(playing) = frame.playing else { return };
-    let Some((m_idx, x)) =
-        grooph_render::staff::current_cursor_x(staff, playing, 0..shown.played.len())
-    else {
+    let Some((m_idx, x)) = grooph_render::staff::current_cursor_x(staff, playing, loop_bars) else {
         return;
     };
     let Some(placed) = staff.placed(m_idx) else { return };
@@ -1494,6 +1529,43 @@ mod tests {
 
     fn bar(staff: &StaffLayout, idx: usize) -> &PlacedMeasure {
         staff.systems.iter().flat_map(|s| &s.measures).find(|p| p.measure_idx == idx).unwrap()
+    }
+
+    #[test]
+    fn a_loop_flag_snaps_to_the_nearest_barline_of_its_row() {
+        use crate::loop_range::{LoopEnd, grab_rect, nearest_bar};
+        use grooph_measure::BarRange;
+        // Eight bars over several rows.
+        let (_, _, staff) = laid_out(&["4/4 q q q q"; 8].join(" | "));
+        assert!(staff.systems.len() > 1, "one row");
+        let first_row: Vec<usize> =
+            staff.systems[0].measures.iter().map(|p| p.measure_idx).collect();
+        let second = staff.systems[1].measures[0].measure_idx;
+        let row_y = |idx: usize| bar(&staff, idx).rect.center().y;
+        // On a bar's left barline, the start flag takes that bar.
+        let left = |idx: usize| bar(&staff, idx).rect.left_center();
+        assert_eq!(
+            nearest_bar(&staff, left(1) + egui::vec2(3.0, 0.0), LoopEnd::First, 0..=7),
+            Some(1)
+        );
+        // Past the right end of a row, the end flag takes its last bar.
+        let last_in_row = *first_row.last().unwrap();
+        let past = egui::pos2(bar(&staff, last_in_row).rect.right() + 50.0, row_y(last_in_row));
+        assert_eq!(nearest_bar(&staff, past, LoopEnd::Last, 0..=7), Some(last_in_row));
+        // Into the next row.
+        let into = egui::pos2(bar(&staff, second).rect.right() - 2.0, row_y(second));
+        assert_eq!(nearest_bar(&staff, into, LoopEnd::Last, 0..=7), Some(second));
+        // It stops at the other flag: only the bars allowed.
+        assert_eq!(nearest_bar(&staff, left(0), LoopEnd::Last, 3..=7), Some(3));
+        // Each flag is grabbed over the top of its barline, finger-sized.
+        let range = BarRange::new(1, second).unwrap();
+        let grab = grab_rect(&staff, range, LoopEnd::First).unwrap();
+        assert!(
+            grab.width() >= 44.0
+                && grab.contains(egui::pos2(left(1).x, bar(&staff, 1).rect.top() + 2.0))
+        );
+        let grab = grab_rect(&staff, range, LoopEnd::Last).unwrap();
+        assert!((grab.center().x - bar(&staff, second).rect.right()).abs() < 1e-3);
     }
 
     #[test]

@@ -339,7 +339,7 @@ fn push_ron(fields: &mut Vec<(String, Box<RawValue>)>, name: &str, ron: String) 
 /// The stored field `name` with only its own fields that read, and the names
 /// of the ones dropped, for a document or a settings group; `None` for any
 /// other field, which reads or drops as a whole.
-fn repair_field(name: &str, raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
+pub(crate) fn repair_field(name: &str, raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
     match name {
         _ if DOC_FIELDS.contains(&name) => repair::<SavedDoc>(raw),
         _ if PLAYBACK_FIELDS.contains(&name) => repair::<PlaybackSettings>(raw),

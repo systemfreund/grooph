@@ -14,6 +14,7 @@ mod keyboard_input;
 mod kit_palette;
 mod library;
 mod library_panel;
+mod loop_range;
 mod measure_panel;
 mod metronome_bars;
 mod metronome_trainer;
@@ -50,7 +51,9 @@ pub use host::Host;
 
 use grooph_layout::staff::Staff;
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
-use grooph_measure::{BeatIdx, Cursor, Instrument, Measure, Score, TimeSignature, VoiceBar};
+use grooph_measure::{
+    BarRange, BeatIdx, Cursor, Instrument, Measure, Score, TimeSignature, VoiceBar,
+};
 
 use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
@@ -58,6 +61,7 @@ use crate::documents::{Document, Documents, RhythmDoc};
 use crate::embed::{Embed, EmbedParams, embed_params};
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
+use crate::loop_range::LoopPlayback;
 use crate::metronome_bars::SavedMetronome;
 use crate::metronome_view::MetronomeState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
@@ -140,6 +144,9 @@ pub(crate) struct SavedDoc {
     dirty: bool,
     /// The library pattern it is.
     active_pattern_id: Option<u64>,
+    /// The loop range; not in the library or links. Written only when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    range: Option<BarRange>,
 }
 
 impl Default for SavedDoc {
@@ -149,6 +156,7 @@ impl Default for SavedDoc {
             cursor: Cursor::start(),
             dirty: false,
             active_pattern_id: None,
+            range: None,
         }
     }
 }
@@ -160,6 +168,7 @@ impl SavedDoc {
             cursor: doc.cursor,
             dirty: doc.dirty,
             active_pattern_id: doc.active_pattern_id,
+            range: doc.range(),
         }
     }
 
@@ -175,11 +184,12 @@ impl SavedDoc {
         };
         // Saved before a drum was struck by one voice at a time.
         let undoubled = score.undouble_instruments();
-        RhythmDoc {
-            dirty: self.dirty || undoubled,
-            active_pattern_id: self.active_pattern_id.filter(|id| library.contains(*id)),
-            ..RhythmDoc::new(score, self.cursor)
-        }
+        let mut doc = RhythmDoc::new(score, self.cursor);
+        doc.dirty = self.dirty || undoubled;
+        doc.active_pattern_id = self.active_pattern_id.filter(|id| library.contains(*id));
+        // A range that does not fit the score reads as none.
+        doc.load_range(self.range.filter(|r| r.fits(doc.score.len())));
+        doc
     }
 }
 
@@ -577,6 +587,7 @@ impl Grooph {
             } else {
                 Played::Rhythm
             },
+            range: self.audio_range(),
         }
     }
 
@@ -592,7 +603,9 @@ impl Grooph {
     pub(crate) fn score_timing(&self) -> ScoreTiming {
         // A calibration plays without swing, as in `playback_options`.
         let swing = if self.calibrating() { Swing::default() } else { self.tab_playback().swing };
-        ScoreTiming::from_score(self.played_score(), self.current_bpm()).with_swing(swing)
+        ScoreTiming::from_score(self.played_score(), self.current_bpm())
+            .with_swing(swing)
+            .with_loop(self.played_range())
     }
 
     /// Tempo being played: the ramp tempo while a ramp runs, else the BPM setting.
@@ -659,6 +672,14 @@ impl Grooph {
             true
         } else {
             false
+        }
+    }
+
+    /// A bar was inserted or removed: the loop range of the document shown
+    /// follows its bars (see [`RhythmDoc::range_follows`]).
+    fn range_follows(&mut self, follow: impl FnOnce(BarRange) -> Option<BarRange>) {
+        if let Some(doc) = self.editor.rhythm_doc_mut() {
+            doc.range_follows(follow);
         }
     }
 
@@ -750,6 +771,9 @@ impl Grooph {
             });
             let cursor = Cursor { measure_idx: doc.score().len() - 1, beat_idx: 0, ..doc.cursor() };
             *doc.cursor_mut() = doc.score().clamp_cursor(cursor);
+            // The new bar lies after the loop range, also one of all bars.
+            let appended = app.editor.doc().score().len() - 1;
+            app.range_follows(|r| Some(r.after_insert(appended)));
             true
         });
     }
@@ -768,6 +792,7 @@ impl Grooph {
                 score.insert(cursor.measure_idx + 1, copy);
             });
             *doc.cursor_mut() = Cursor { measure_idx: cursor.measure_idx + 1, ..cursor };
+            app.range_follows(|r| Some(r.after_insert(cursor.measure_idx + 1)));
             true
         });
     }
@@ -832,6 +857,7 @@ impl Grooph {
             app.editor.doc_mut().edit_score(|s| s.remove(idx));
             let doc = app.editor.doc_mut();
             *doc.cursor_mut() = doc.score().clamp_cursor(doc.cursor());
+            app.range_follows(|r| r.after_remove(idx));
             true
         });
     }
@@ -1259,6 +1285,14 @@ impl Grooph {
             self.playback_ctl.accuracy.tracker.on_playback_stop();
         }
         self.playback_ctl.playback.reset();
+        self.playback_ctl.loop_play = LoopPlayback::default();
+        // Playback starts at the loop range's first bar.
+        let start = playback_clock::loop_start(&self.score_timing());
+        self.playback_ctl.playback.smooth_tick = start;
+        self.playback_ctl.playback.heard_tick = start;
+        if let Some(t) = accuracy_start.filter(|_| self.accuracy_active()) {
+            self.playback_ctl.accuracy.tracker.on_playback_start_at(t, start);
+        }
         // Mark the count-in as pending until the UI clock is known (first
         // frame of the measure panel fills in `since`).
         if self.playback_options().count_in {
@@ -1291,6 +1325,7 @@ impl Grooph {
         }
         self.playback_ctl.play_along.engaged = false;
         self.playback_ctl.playback.reset();
+        self.playback_ctl.loop_play = LoopPlayback::default();
         self.end_calibration_run();
 
         self.ui.platform.release_wake_lock();
@@ -1489,6 +1524,7 @@ impl Grooph {
                 midi: MidiState { input: midi_input, available_ports: midi_input_ports },
                 mic: MicState::default(),
                 play_along: PlayAlongState::default(),
+                loop_play: LoopPlayback::default(),
             },
             ui: UiShell {
                 mode: Mode::Playback,

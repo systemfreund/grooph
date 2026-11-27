@@ -472,6 +472,14 @@ mod tests {
         // Bars played on their own loop among themselves.
         assert_eq!(next(1, 1..2), 1);
         assert_eq!(next(2, 1..3), 1);
+        // A loop range of the middle bars: from its last bar to its first,
+        // and from a bar before it on into it.
+        let score = parse_score("4/4 q q q q | q q q q | q q q q | q q q q").unwrap();
+        let staff = build_staff_layout(&score, &opts());
+        let next = |at, bars| current_cursor_x(&staff, (at, end), bars).unwrap().0;
+        assert_eq!(next(2, 1..3), 1);
+        assert_eq!(next(1, 1..3), 2);
+        assert_eq!(next(0, 1..3), 1);
     }
 
     #[test]

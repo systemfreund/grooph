@@ -215,6 +215,8 @@ impl Doc for MetronomeDoc {
             score: self.score.clone(),
             cursor: self.cursor,
             meters: self.meters.clone(),
+            range: None,
+            range_changes: 0,
         }
     }
 

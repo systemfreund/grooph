@@ -37,11 +37,8 @@ pub(super) fn update_progress(
     }
     remember_played(data, &global_beats, timing, score.staff);
 
+    // In the loop range's ticks.
     let mut current_tick = timing.seconds_to_global_tick(elapsed);
-    // seconds_to_global_tick already rem_euclids, but be defensive.
-    if current_tick >= total {
-        current_tick %= total;
-    }
     let Some(last_tick) = data.last_tick else {
         data.last_tick = Some(current_tick);
         data.cursor_s = now_seconds;
@@ -66,11 +63,11 @@ pub(super) fn update_progress(
 
     if current_tick < last_tick {
         // Score-loop wrapped.
-        retain_extras(data, last_tick, total, total);
+        retain_extras(data, last_tick, timing.loop_end_tick() as f64, timing);
         data.loops += 1;
-        retain_extras(data, 0.0, current_tick, total);
+        retain_extras(data, timing.loop_start_tick() as f64, current_tick, timing);
     } else {
-        retain_extras(data, last_tick, current_tick, total);
+        retain_extras(data, last_tick, current_tick, timing);
     }
     data.last_tick = Some(current_tick);
     data.cursor_s = now_seconds;
@@ -83,10 +80,10 @@ pub(super) fn update_progress(
 /// The extra hits of an earlier loop go once the cursor passes their place
 /// again (from `start` to `end` on the loop), as a note's mark changes when
 /// it is judged again.
-fn retain_extras(data: &mut RecordingData, start: f64, end: f64, total: f64) {
+fn retain_extras(data: &mut RecordingData, start: f64, end: f64, timing: &ScoreTiming) {
     let loops = data.loops;
     data.extras.retain(|e| {
-        let at = e.performed_tick.rem_euclid(total);
+        let at = timing.wrap_tick(e.performed_tick);
         e.loop_idx >= loops || !(at > start && at <= end)
     });
 }

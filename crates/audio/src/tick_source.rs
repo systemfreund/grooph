@@ -1,7 +1,7 @@
 //! Sample-accurate playback cursor over the score loop.
 //!
-//! A [`TickSource`] advances a `cursor` (measured in global ticks across the
-//! whole score loop) by one audio sample at a time and collects any
+//! A [`TickSource`] advances a `cursor` (measured in global ticks of the
+//! whole score) by one audio sample at a time and collects any
 //! [`SoundType`] triggers that the cursor crossed during that step. It owns
 //! *only* the timing state — no voices, no synthesis, no rodio types — and
 //! pulls per-measure tempo from a [`ScoreTiming`] so per-measure tempo
@@ -11,8 +11,8 @@ use crate::schedule::{Schedule, SoundType};
 use grooph_measure::tempo::ScoreTiming;
 use std::sync::Arc;
 
-/// One bar of clicks played before the score starts. Ticks are in the first
-/// measure's tick scale and run at its tempo.
+/// One bar of clicks played before the score starts. Ticks are in the tick
+/// scale of the loop's first measure and run at its tempo.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CountInPlan {
     pub(crate) ticks: u32,
@@ -32,7 +32,7 @@ pub(crate) struct TickSource {
     cursor: f64,
     sample_rate: u32,
     count_in: Option<CountInProgress>,
-    /// Bars started since the score's first downbeat, across loops.
+    /// Bars started since the loop's first downbeat, across loops.
     bars: u64,
 }
 
@@ -50,8 +50,8 @@ impl TickSource {
         }
     }
 
-    /// Bars started since the score's first downbeat (0 = first bar). Keeps
-    /// counting across loops.
+    /// Bars started since playback started at the loop's first downbeat
+    /// (0 = first bar). Keeps counting across loops: the bars played.
     pub(crate) fn bars(&self) -> u64 {
         self.bars
     }
@@ -66,21 +66,31 @@ impl TickSource {
         self.cursor = (self.cursor - ticks).max(0.0);
     }
 
-    /// Start playback from the top of the score, optionally after a count-in.
-    pub(crate) fn restart(&mut self, count_in: Option<&Arc<CountInPlan>>) {
-        self.cursor = 0.0;
+    /// Start playback from the top of the loop (`timing`'s
+    /// [`loop_start_tick`](ScoreTiming::loop_start_tick)), optionally after
+    /// a count-in.
+    pub(crate) fn restart(&mut self, timing: &ScoreTiming, count_in: Option<&Arc<CountInPlan>>) {
+        self.cursor = Self::loop_start(timing);
         self.bars = 0;
         self.count_in = count_in
             .filter(|p| p.ticks > 0)
             .map(|plan| CountInProgress { plan: Arc::clone(plan), pos: 0.0 });
     }
 
+    /// The loop's first tick, or 0 for an empty timing.
+    fn loop_start(timing: &ScoreTiming) -> f64 {
+        if timing.measure_count() == 0 { 0.0 } else { timing.loop_start_tick() as f64 }
+    }
+
     /// Advance the cursor by one audio sample using the per-measure tempo at
     /// the current cursor position, and append every schedule trigger
     /// crossed during this step to `out`.
     ///
-    /// Wraps the cursor at the end of the score loop so the metronome loops
-    /// indefinitely. `tempo_scale` speeds the score up (> 1) or slows it down
+    /// At each barline the next bar is the one after (bar 0 after the
+    /// score's last) if it is in `timing`'s loop, else the loop's first
+    /// ([`BarRange::next_bar`](grooph_measure::BarRange::next_bar)), so the
+    /// loop repeats indefinitely and a new loop takes over at the next
+    /// barline. `tempo_scale` speeds the score up (> 1) or slows it down
     /// relative to `timing`; it does not apply to the count-in.
     pub(crate) fn advance_one_sample(
         &mut self,
@@ -89,13 +99,14 @@ impl TickSource {
         tempo_scale: f64,
         out: &mut Vec<SoundType>,
     ) {
-        let total_ticks = timing.total_loop_ticks() as f64;
-        if total_ticks <= 0.0 {
+        if timing.score_ticks() == 0 {
             return;
         }
+        let loop_start = Self::loop_start(timing);
 
         if let Some(ci) = &mut self.count_in {
-            let step = timing.ticks_per_sec_in_measure(0) / self.sample_rate as f64;
+            let first = timing.loop_bars().first();
+            let step = timing.ticks_per_sec_in_measure(first) / self.sample_rate as f64;
             let old_pos = ci.pos;
             let new_pos = old_pos + step;
             let end = ci.plan.ticks as f64;
@@ -110,12 +121,12 @@ impl TickSource {
                 return;
             }
             // Count-in finished within this sample: carry the remainder into
-            // the score so the first downbeat lands exactly one bar later.
+            // the score so the loop's first downbeat lands exactly one bar
+            // later.
             self.count_in = None;
-            self.cursor = 0.0;
             let leftover = new_pos - end;
-            schedule.collect_in_range(0, leftover, out);
-            self.cursor = leftover;
+            schedule.collect_in_range(loop_start as u64, loop_start + leftover, out);
+            self.cursor = loop_start + leftover;
             return;
         }
 
@@ -130,24 +141,21 @@ impl TickSource {
         let ticks_per_sample = tps / self.sample_rate as f64;
 
         let mut new_cursor = old_cursor + ticks_per_sample;
+        let bar_end = timing.measure_start_tick(measure_idx + 1) as f64;
 
-        let wrapped = new_cursor >= total_ticks;
-        if wrapped {
-            // 1. [old_cursor, total_ticks)
-            schedule.collect_in_range(old_cursor.ceil() as u64, total_ticks, out);
-
-            // Wrap at score end.
-            new_cursor -= total_ticks;
-
-            // 2. [0.0, new_cursor)
-            schedule.collect_in_range(0, new_cursor, out);
+        if new_cursor >= bar_end {
+            // 1. [old_cursor, bar_end)
+            schedule.collect_in_range(old_cursor.ceil() as u64, bar_end, out);
+            // On into the next bar of the loop, which may lie elsewhere.
+            let next = timing.loop_bars().next_bar(measure_idx, timing.measure_count());
+            let next_start = timing.measure_start_tick(next) as f64;
+            new_cursor = next_start + (new_cursor - bar_end);
+            // 2. [next_start, new_cursor)
+            schedule.collect_in_range(next_start as u64, new_cursor, out);
+            self.bars += 1;
         } else {
             // [old_cursor, new_cursor)
             schedule.collect_in_range(old_cursor.ceil() as u64, new_cursor, out);
-        }
-
-        if wrapped || timing.measure_at_global_tick(new_cursor) != measure_idx {
-            self.bars += 1;
         }
         self.cursor = new_cursor;
     }
@@ -158,7 +166,7 @@ mod tests {
     use super::*;
     use grooph_measure::click::ClickBars;
     use grooph_measure::duration::q;
-    use grooph_measure::{Beat, Measure, Score, TimeSignature};
+    use grooph_measure::{BarRange, Beat, Measure, Score, TimeSignature};
 
     fn score_4_4_quarters() -> Score {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
@@ -223,7 +231,7 @@ mod tests {
         let timing = ScoreTiming::from_score(&score, 120);
         let schedule = Schedule::build(&score, &timing, None, Some(&ClickBars::default()));
         let mut src = TickSource::new(48000);
-        src.restart(Some(&count_in_4_4()));
+        src.restart(&timing, Some(&count_in_4_4()));
         let mut out = Vec::new();
         let mut count_in_clicks = Vec::new();
         let mut first_downbeat = None;
@@ -262,7 +270,7 @@ mod tests {
         for _ in 0..10_000 {
             src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
         }
-        src.restart(None);
+        src.restart(&timing, None);
         assert_eq!(src.cursor(), 0.0);
     }
 
@@ -281,7 +289,7 @@ mod tests {
             src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
         }
         assert_eq!(src.bars(), 2);
-        src.restart(None);
+        src.restart(&timing, None);
         assert_eq!(src.bars(), 0);
     }
 
@@ -317,5 +325,91 @@ mod tests {
             fast.advance_one_sample(&timing, &schedule, 1.5, &mut out);
         }
         assert!((fast.cursor() / normal.cursor() - 1.5).abs() < 1e-6);
+    }
+
+    /// `n` bars of 4/4 quarters.
+    fn bars_of_quarters(n: usize) -> Score {
+        let bar = score_4_4_quarters().measures()[0].clone();
+        Score::new(vec![bar; n])
+    }
+
+    /// The bars (counted from 1) `src` plays over `seconds` at 120 BPM,
+    /// with `timing`, each once as it starts; the first is the bar it is in.
+    fn bars_played(src: &mut TickSource, timing: &ScoreTiming, seconds: f64) -> Vec<usize> {
+        let schedule = Schedule::default();
+        let mut out = Vec::new();
+        let mut bars = vec![timing.measure_at_global_tick(src.cursor()) + 1];
+        for _ in 0..(48_000.0 * seconds) as usize {
+            src.advance_one_sample(timing, &schedule, 1.0, &mut out);
+            let bar = timing.measure_at_global_tick(src.cursor()) + 1;
+            if src.cursor() >= 0.0 && bars.last() != Some(&bar) {
+                bars.push(bar);
+            }
+            assert!(timing.loop_bars().contains(bar - 1) || bars.len() <= 2, "{bars:?}");
+        }
+        bars
+    }
+
+    /// Bars `a..=b` counted from 1.
+    fn range(a: usize, b: usize) -> Option<BarRange> {
+        BarRange::new(a - 1, b - 1)
+    }
+
+    #[test]
+    fn a_loop_range_starts_at_its_first_bar_and_wraps_after_its_last() {
+        let score = bars_of_quarters(6);
+        let timing = ScoreTiming::from_score(&score, 120).with_loop(range(3, 5));
+        let mut src = TickSource::new(48000);
+        src.restart(&timing, None);
+        assert_eq!(src.cursor(), timing.measure_start_tick(2) as f64);
+        // Bars of 2 s: 3 4 5 3 4 5 3 in 13 s, never outside the range.
+        assert_eq!(bars_played(&mut src, &timing, 13.0), [3, 4, 5, 3, 4, 5, 3]);
+        assert_eq!(src.bars(), 6);
+    }
+
+    #[test]
+    fn a_count_in_leads_into_the_first_bar_of_the_range() {
+        let score = bars_of_quarters(4);
+        let timing = ScoreTiming::from_score(&score, 120).with_loop(range(2, 3));
+        let schedule = Schedule::build(&score, &timing, None, Some(&ClickBars::default()));
+        let mut src = TickSource::new(48000);
+        src.restart(&timing, Some(&count_in_4_4()));
+        let mut out = Vec::new();
+        for _ in 0..(48_000 * 2 + 10) {
+            src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
+        }
+        assert!(!src.in_count_in());
+        let start = timing.measure_start_tick(1) as f64;
+        assert!(src.cursor() > start && src.cursor() < start + 100.0, "{}", src.cursor());
+        assert_eq!(src.bars(), 0);
+    }
+
+    #[test]
+    fn a_new_range_takes_over_at_the_next_barline() {
+        let score = bars_of_quarters(8);
+        let whole = ScoreTiming::from_score(&score, 120);
+        let old = whole.clone().with_loop(range(3, 6));
+        // Halfway through bar 5 of 3..=6.
+        let in_bar_5 = || {
+            let mut src = TickSource::new(48000);
+            src.restart(&old, None);
+            bars_played(&mut src, &old, 5.0);
+            assert_eq!(old.measure_at_global_tick(src.cursor()), 4);
+            src
+        };
+        let after = |new: &ScoreTiming| bars_played(&mut in_bar_5(), new, 8.0);
+        // The end dragged to bar 8: on into it, then back to 3.
+        assert_eq!(after(&whole.clone().with_loop(range(3, 8))), [5, 6, 7, 8, 3]);
+        // The end dragged onto bar 5: back to 3 after it.
+        assert_eq!(after(&whole.clone().with_loop(range(3, 5))), [5, 3, 4, 5, 3]);
+        // Loop off: on to the score's end, then bar 1.
+        assert_eq!(after(&whole), [5, 6, 7, 8, 1]);
+        // A range ahead: the bar plays to its end, then its first bar.
+        assert_eq!(after(&whole.clone().with_loop(range(7, 8))), [5, 7, 8, 7, 8]);
+        // No count-in at the switch, and the bars keep counting.
+        let mut src = in_bar_5();
+        bars_played(&mut src, &whole, 2.0);
+        assert!(!src.in_count_in());
+        assert_eq!(src.bars(), 3);
     }
 }

@@ -1,5 +1,5 @@
 use crate::metronome_bars::MetronomeBars;
-use grooph_measure::{Cursor, Score};
+use grooph_measure::{BarRange, Cursor, Score};
 use std::collections::VecDeque;
 
 pub(crate) const DEFAULT_UNDO_LIMIT: usize = 200;
@@ -10,6 +10,10 @@ pub(crate) struct EditorSnapshot {
     /// The rest of the metronome's document: every meter's bars but the
     /// one `score` clicks, and that one's ratio name.
     pub meters: MetronomeBars,
+    /// A rhythm document's loop range, and how often the user had changed
+    /// it then (see `RhythmDoc::restore`); `None` and 0 in the metronome.
+    pub range: Option<BarRange>,
+    pub range_changes: u64,
 }
 
 pub(crate) struct UndoHistory {
@@ -81,6 +85,8 @@ mod tests {
             score: Score::single(m),
             cursor: Cursor::at(0, beat_idx),
             meters: MetronomeBars::default(),
+            range: None,
+            range_changes: 0,
         }
     }
 
@@ -170,6 +176,8 @@ mod tests {
             score: score.clone(),
             cursor: Cursor::start(),
             meters: MetronomeBars::default(),
+            range: None,
+            range_changes: 0,
         };
 
         let mut h = UndoHistory::new(10);
@@ -184,6 +192,8 @@ mod tests {
                 score,
                 cursor: Cursor::start(),
                 meters: MetronomeBars::default(),
+                range: None,
+                range_changes: 0,
             })
             .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent

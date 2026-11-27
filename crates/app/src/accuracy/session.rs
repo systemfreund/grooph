@@ -299,8 +299,9 @@ impl GlobalBeatOnset {
 /// counter rhythm.
 pub(crate) const TRACKED_VOICES: usize = 2;
 
-/// Flatten the onsets of every measure into a vector of score-global
-/// entries. On one line: each tick where a beat of any voice starts, once,
+/// Flatten the onsets of every measure that loops (`timing`'s loop range;
+/// the notes outside it are never played, so never judged) into a vector of
+/// score-global entries. On one line: each tick where a beat of any voice starts, once,
 /// a note if any voice plays one there (Notes + Rests). On a kit's staff:
 /// each head, once per instrument and tick (notes only). The score iterates
 /// measures in order; within each measure onsets are in order.
@@ -309,7 +310,11 @@ pub(crate) fn compute_global_beat_onsets(
     timing: &ScoreTiming,
 ) -> Vec<GlobalBeatOnset> {
     let mut out: Vec<GlobalBeatOnset> = Vec::new();
+    let looped = timing.loop_bars().bars();
     for (m_idx, measure) in score.measures().iter().enumerate() {
+        if !looped.contains(&m_idx) && timing.measure_count() == score.len() {
+            continue;
+        }
         let start = timing.measure_start_tick(m_idx);
         let ts = measure.time_signature();
         let entry = |tick: u32, is_note, voices, instrument| GlobalBeatOnset {
@@ -366,7 +371,8 @@ pub(crate) fn compute_global_beat_onsets(
 }
 
 /// Set each note's `prev_same` and `next_same`: the notes of the same
-/// instrument around it on the loop. On one line a note's neighbours are
+/// instrument around it on the loop (from the loop range's last bar round
+/// to its first). On one line a note's neighbours are
 /// the notes before and after it. Rests are no neighbours, so that a note
 /// is judged the same however its length is written (a quarter, or an
 /// eighth and an eighth rest); a rest links to itself.
@@ -829,6 +835,21 @@ impl RecordingSession {
             // brings the new ones.
             d.played = None;
             d.extras = shift_extras(std::mem::take(&mut d.extras), ticks);
+        }
+    }
+
+    /// The loop range changed (see `AccuracyTracker::loop_changed`): the
+    /// open stretch is made final with what it has, and the lanes start
+    /// again from the clock's next anchor, over the new range's notes. The
+    /// counts, marks, extra hits and the loop count stay. No-op when `Idle`.
+    pub(super) fn loop_changed(&mut self) {
+        if let Self::Recording(d) = self {
+            finalise(d, Until::Stop);
+            d.lanes.clear();
+            d.origin = None;
+            d.cursor_log = CursorLog::default();
+            d.last_tick = None;
+            d.played = None;
         }
     }
 

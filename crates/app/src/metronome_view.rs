@@ -312,9 +312,12 @@ impl Grooph {
         &self.editor.docs.metronome.score().measures()[0]
     }
 
-    /// Bars in the score being played, for the tempo ramp's loops.
+    /// Bars of one loop of the score being played, for the tempo ramp's
+    /// loops: those of the loop range the audio engine plays (as it counts
+    /// them), else the whole score's.
     pub(crate) fn played_bars(&self) -> usize {
-        self.played_score().len()
+        let len = self.played_score().len();
+        self.audio_range().map_or(len, |r| r.clamped(len).len())
     }
 
     /// Open the metronome's document, on its first click.

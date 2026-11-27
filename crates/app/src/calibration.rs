@@ -11,7 +11,7 @@ use crate::documents::{Document, Documents};
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, PlayAlongState};
 use crate::{Grooph, TransportState};
 use eframe::egui;
-use grooph_measure::Score;
+use grooph_measure::{BarRange, Score};
 
 /// Tempo of the calibration click.
 pub(crate) const CALIBRATION_BPM: u32 = 100;
@@ -95,6 +95,20 @@ pub(crate) fn played_score<'a>(
     play_along: &'a PlayAlongState,
 ) -> &'a Score {
     play_along.running_calibration().map_or(docs.get(document).score(), |cal| &cal.score)
+}
+
+/// The loop range of [`played_score`] the audio engine plays: `document`'s,
+/// none in the metronome and while a calibration runs. See
+/// [`crate::loop_range`].
+pub(crate) fn played_range(
+    docs: &Documents,
+    document: Document,
+    play_along: &PlayAlongState,
+) -> Option<BarRange> {
+    if play_along.running_calibration().is_some() {
+        return None;
+    }
+    docs.rhythm(document)?.range()
 }
 
 impl Grooph {

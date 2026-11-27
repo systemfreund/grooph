@@ -668,7 +668,7 @@ impl Grooph {
                 generator.config.settings.bars = bars;
                 generator.config.endless = false;
             }
-            Some(None) => generator.config.endless = true,
+            Some(None) => self.switch_endless_on(),
             None => {}
         }
         picked.is_some()
