@@ -19,7 +19,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::head::MixerGroup;
 use grooph_measure::swing::Swing;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Instrument, Score};
+use grooph_measure::{BarRange, Instrument, Score};
 use log::{debug, error, info, trace, warn};
 use rodio::Source;
 use rodio::source::Function as RodioFunction;
@@ -270,6 +270,11 @@ pub struct PlaybackOptions {
     pub click: ClickBars,
     /// What the played score is.
     pub played: Played,
+    /// The bars that play and loop (the loop range); `None` plays and loops
+    /// the whole score. Playback starts at its first bar, counts in in that
+    /// bar's meter and, when it changes while playing, takes the new range
+    /// over at the next barline (see [`BarRange::next_bar`]).
+    pub range: Option<BarRange>,
 }
 
 /// The voice of a click bar that holds its counter rhythm, in
@@ -291,13 +296,17 @@ pub enum Played {
     Clicks,
 }
 
-/// The bar the audio engine is playing, as counted since the score started.
+/// The bar the audio engine is playing, as counted since playback started.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BarState {
-    /// Bars started since the first downbeat (0 = first bar), across loops.
+    /// Bars played since the first downbeat (0 = first bar), across loops
+    /// of the loop range.
     pub bar: u64,
     /// The gap click silences this bar.
     pub muted: bool,
+    /// Bars of one loop as of this bar (the loop range's, a new range's from
+    /// the barline it took over at): what a tempo ramp in loops counts.
+    pub loop_len: usize,
 }
 
 pub struct Audio {
@@ -575,7 +584,8 @@ impl Audio {
             return Arc::clone(plan);
         }
         let options = &self.options;
-        let timing = ScoreTiming::from_score(score, bpm).with_swing(options.swing);
+        let timing =
+            ScoreTiming::from_score(score, bpm).with_swing(options.swing).with_loop(options.range);
         let schedule = match options.played {
             Played::Score => {
                 Schedule::build(score, &timing, options.ghost_notes, Some(&options.click))
@@ -583,7 +593,8 @@ impl Audio {
             Played::Rhythm => Schedule::build(score, &timing, options.ghost_notes, None),
             Played::Clicks => Schedule::clicks(score, &timing),
         };
-        let count_in = if options.count_in { count_in_plan(score).map(Arc::new) } else { None };
+        let count_in =
+            if options.count_in { count_in_plan(score, options.range).map(Arc::new) } else { None };
         let plan =
             PlaybackPlan { bpm, timing, schedule, count_in, gap: options.gap, ramp: options.ramp };
         // Inputs that changed back keep the plan the audio thread already has.
@@ -728,8 +739,10 @@ impl Audio {
     }
 
     /// Returns `(global_tick, total_loop_ticks)` where `global_tick` is the
-    /// current audio cursor over the whole score loop. It is negative while
-    /// the count-in bar plays and reaches 0 on the score's first downbeat.
+    /// current audio cursor in the score's ticks, inside the loop. While the
+    /// count-in bar plays it is negative instead, the ticks still to count
+    /// in, and reaches 0 when the count-in ends, on the downbeat of the
+    /// loop's first bar (where the cursor then is).
     pub fn playback_position(&self) -> Option<(f64, u64)> {
         // Non-blocking try to avoid UI stalls; fall back to None if busy
         try_lock(&self.shared_state)
@@ -794,11 +807,13 @@ fn try_lock<T>(state: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
     }
 }
 
-/// Count-in bar for `score`: the first measure's length with a click on the
+/// Count-in bar for `score` played from the first bar of `range` (the
+/// score's first without one): that measure's length with a click on the
 /// downbeat and each primary beat, and a softer one on every other beat unit
 /// (so 7/8 clicks all seven eighths, the group starts louder).
-fn count_in_plan(score: &Score) -> Option<CountInPlan> {
-    let ts = score.measures().first()?.time_signature();
+fn count_in_plan(score: &Score, range: Option<BarRange>) -> Option<CountInPlan> {
+    let first = range.map_or(0, |r| r.clamped(score.len()).first());
+    let ts = score.measures().get(first)?.time_signature();
     let ticks = DEFAULT_GRID.ticks_per_measure(&ts);
     let primaries = DEFAULT_GRID.primary_boundaries(&ts);
     let unit = DEFAULT_GRID.ticks_per_beat(&ts).max(1);
@@ -857,7 +872,7 @@ impl MetronomeSource {
         let seed = local_params.seed;
         let mut tick_source = TickSource::new(sample_rate);
         if is_playing == PlayerState::Playing {
-            tick_source.restart(local_params.plan.count_in.as_ref());
+            tick_source.restart(&local_params.plan.timing, local_params.plan.count_in.as_ref());
         }
         Self {
             shared_state: shared,
@@ -939,7 +954,10 @@ impl MetronomeSource {
 
             if starting {
                 info!("Starting playback.");
-                self.tick_source.restart(self.local_params.plan.count_in.as_ref());
+                self.tick_source.restart(
+                    &self.local_params.plan.timing,
+                    self.local_params.plan.count_in.as_ref(),
+                );
                 self.gap.reset(self.local_params.seed ^ self.samples_processed as u64);
             }
             // Only once the score started over, so a frame that sees the flag
@@ -956,7 +974,8 @@ impl MetronomeSource {
             return None;
         }
         let bar = self.tick_source.bars();
-        Some(BarState { bar, muted: self.gap.muted(&self.local_params.plan.gap, bar) })
+        let muted = self.gap.muted(&self.local_params.plan.gap, bar);
+        Some(BarState { bar, muted, loop_len: self.tick_source.loop_len() })
     }
 
     /// Ratio of the ramp tempo of the current bar to the score tempo.
@@ -965,7 +984,9 @@ impl MetronomeSource {
         if !params.ramp.enabled || params.bpm == 0 || self.tick_source.in_count_in() {
             return 1.0;
         }
-        let bars = params.timing.measure_count();
+        // A loop is one pass through the loop range; a new range's from
+        // the barline it takes over at.
+        let bars = self.tick_source.loop_len();
         params.ramp.bpm_for_bar(params.bpm, self.tick_source.bars(), bars) as f64
             / params.bpm as f64
     }
@@ -1056,7 +1077,7 @@ mod tests {
 
     fn count_in_of(ts: TimeSignature) -> Vec<SoundType> {
         let score = Score::new(vec![Measure::new(ts)]);
-        count_in_plan(&score).unwrap().clicks.into_iter().map(|(_, s)| s).collect()
+        count_in_plan(&score, None).unwrap().clicks.into_iter().map(|(_, s)| s).collect()
     }
 
     /// Counts the allocations and deallocations of the current thread while
@@ -1135,7 +1156,7 @@ mod tests {
     fn plan_for(audio: &Audio, bpm: u32, score: &Score) -> Arc<PlaybackPlan> {
         let timing = ScoreTiming::from_score(score, bpm);
         let schedule = Schedule::build(score, &timing, None, Some(&audio.options.click));
-        let count_in = count_in_plan(score).map(Arc::new);
+        let count_in = count_in_plan(score, None).map(Arc::new);
         Arc::new(PlaybackPlan {
             bpm,
             timing,
@@ -1572,6 +1593,120 @@ mod tests {
         let (clicks, counter, _) = layers_heard(&heard_with_gap(random(GapMute::ClickBar), 16));
         assert_eq!(counter, all);
         assert!(clicks.len() < all.len(), "{clicks:?}");
+    }
+
+    #[test]
+    fn the_count_in_is_in_the_meter_of_the_ranges_first_bar() {
+        let score = Score::new(vec![
+            Measure::new(TimeSignature::FOUR_FOUR),
+            Measure::new(TimeSignature::SIX_EIGHT),
+            Measure::new(TimeSignature::FOUR_FOUR),
+        ]);
+        let plan = count_in_plan(&score, BarRange::new(1, 2)).unwrap();
+        assert_eq!(plan.ticks, DEFAULT_GRID.ticks_per_measure(&TimeSignature::SIX_EIGHT));
+        assert_eq!(plan.clicks.len(), 6);
+        assert_eq!(count_in_plan(&score, None).unwrap().clicks.len(), 4);
+    }
+
+    /// A source playing `score` with `options` at 120 BPM, past the count-in.
+    fn playing(score: &Score, options: PlaybackOptions) -> (Audio, MetronomeSource) {
+        let mut audio = Audio::new(120).unwrap();
+        audio.set_audio_settings(silent_settings());
+        audio.set_playback_options(options);
+        audio.update(&PlayerState::Playing, 120, score, 0.0);
+        let source = MetronomeSource::with_sample_rate(Arc::clone(&audio.shared_state), 8_000);
+        (audio, source)
+    }
+
+    /// The bar played (counted from 1), the bars played, whether muted, and
+    /// the ramp's tempo, at the middle of each of the next `bars` bars of
+    /// 2 s (4/4 at 120 BPM, tempo changes aside).
+    fn per_bar(source: &mut MetronomeSource, bars: usize) -> Vec<(usize, u64, bool, u32)> {
+        (0..bars)
+            .map(|_| {
+                for _ in 0..8_000 {
+                    source.next();
+                }
+                let timing = &source.local_params.plan.timing;
+                let bar = timing.measure_at_global_tick(source.tick_source.cursor()) + 1;
+                let loop_len = timing.loop_bars().len();
+                let state = source.current_bar().unwrap();
+                // What the app's ramp counts, from the engine itself.
+                assert_eq!(state.loop_len, loop_len);
+                let bpm = (120.0 * source.tempo_scale()).round() as u32;
+                for _ in 0..8_000 {
+                    source.next();
+                }
+                (bar, state.bar, state.muted, bpm)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn gap_click_and_ramp_count_the_bars_and_passes_of_the_range() {
+        let score = score_of(TimeSignature::FOUR_FOUR, 4);
+        let gap = GapClick { enabled: true, on_bars: 1, off_bars: 1, ..GapClick::default() };
+        let ramp = TempoRamp {
+            enabled: true,
+            target_bpm: 200,
+            step_bpm: 10,
+            every: 1,
+            unit: RampUnit::Loops,
+            ..TempoRamp::default()
+        };
+        let range = BarRange::new(1, 2);
+        let (_audio, mut source) =
+            playing(&score, PlaybackOptions { gap, range, ..Default::default() });
+        let gaps: Vec<_> = per_bar(&mut source, 4).iter().map(|&(b, n, m, _)| (b, n, m)).collect();
+        assert_eq!(gaps, [(2, 0, false), (3, 1, true), (2, 2, false), (3, 3, true)]);
+
+        let (_audio, mut source) =
+            playing(&score, PlaybackOptions { ramp, range, ..Default::default() });
+        // Bars at 120 BPM last 2 s, at 130 BPM less: look at the first pass
+        // only by the bars played.
+        let first = per_bar(&mut source, 2);
+        assert_eq!(
+            first.iter().map(|&(b, n, _, t)| (b, n, t)).collect::<Vec<_>>(),
+            [(2, 0, 120), (3, 1, 120)]
+        );
+        let next = per_bar(&mut source, 1)[0];
+        assert_eq!((next.0, next.1, next.3), (2, 2, 130));
+    }
+
+    #[test]
+    fn a_plan_with_a_new_range_moves_neither_the_cursor_nor_starts_over() {
+        let score = score_of(TimeSignature::FOUR_FOUR, 8);
+        let range = BarRange::new(2, 5);
+        let (mut audio, mut source) =
+            playing(&score, PlaybackOptions { range, ..Default::default() });
+        // Halfway through bar 5 of 3..=6.
+        for _ in 0..(8_000 * 5) {
+            source.next();
+        }
+        let before = source.tick_source.cursor();
+        let bars = source.tick_source.bars();
+        audio.set_playback_options(PlaybackOptions {
+            range: BarRange::new(2, 7),
+            ..Default::default()
+        });
+        audio.update(&PlayerState::Playing, 120, &score, 0.0);
+        let published = audio.playback_position().unwrap().0;
+        assert!((published - before).abs() < 2_000.0, "{published} {before}");
+        for _ in 0..1024 {
+            source.next();
+        }
+        assert_eq!(source.local_params.plan.timing.loop_bars(), BarRange::new(2, 7).unwrap());
+        assert!(!source.tick_source.in_count_in());
+        assert!(source.tick_source.cursor() > before);
+        assert_eq!(source.tick_source.bars(), bars);
+        let timing = &source.local_params.plan.timing;
+        assert_eq!(timing.measure_at_global_tick(source.tick_source.cursor()), 4);
+        // The old range's length counts for a ramp in loops until the barline.
+        assert_eq!(source.tick_source.loop_len(), 4);
+        for _ in 0..8_000 {
+            source.next();
+        }
+        assert_eq!(source.tick_source.loop_len(), 6);
     }
 
     #[test]

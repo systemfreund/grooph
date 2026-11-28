@@ -1,3 +1,4 @@
+mod bar_range;
 mod beat;
 mod cleanup;
 pub mod click;
@@ -31,6 +32,7 @@ pub mod voicing;
 
 use BeatKind::Note;
 use BeatKind::Rest;
+pub use bar_range::BarRange;
 pub use beat::{Beat, BeatKind, NoHand};
 use duration::{Duration, TupletSpec};
 use editing::Modification;

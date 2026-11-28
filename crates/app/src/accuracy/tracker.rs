@@ -197,6 +197,15 @@ impl AccuracyTracker {
         self.last_extras.clear();
     }
 
+    /// The bars played go by a new loop range: the run goes on (its counts,
+    /// marks and extra hits stay), judging the new range's notes from the
+    /// clock's next anchor on. The open stretch closes with the hits it
+    /// has: a window open across the old range's wrap is not judged
+    /// against hits at the new range's start.
+    pub(crate) fn loop_changed(&mut self) {
+        self.session.loop_changed();
+    }
+
     /// The score lost `ticks` from its front (endless mode dropped a played
     /// measure): the marks of the notes still there move back with them.
     pub(crate) fn drop_leading_ticks(&mut self, ticks: u64) {
@@ -979,6 +988,115 @@ mod tests {
         assert!(positions.notable.is_some());
         tracker.dismiss_summary();
         assert!(tracker.last_positions().is_none());
+    }
+}
+
+/// A loop range: only its notes are judged, round from its last bar to its
+/// first, and a new range carries the run on.
+#[cfg(test)]
+mod loop_range_tests {
+    use super::tests::score_of_quarters;
+    use super::*;
+    use grooph_measure::{BarRange, TimeSignature};
+
+    /// Four bars of 4/4 quarters at 120 BPM (2 s each; 5040 ticks a
+    /// quarter), bars `a..=b` (from 1) looping.
+    fn looping(a: usize, b: usize) -> (Score, ScoreTiming) {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR; 4]);
+        let timing = ScoreTiming::from_score(&score, 120).with_loop(BarRange::new(a - 1, b - 1));
+        (score, timing)
+    }
+
+    /// The tick of beat `beat` (from 0) of bar `bar` (from 1).
+    fn note(bar: usize, beat: u64) -> u64 {
+        (bar as u64 - 1) * 4 * 5040 + beat * 5040
+    }
+
+    /// Frames at 60 per second from `from` to `to` (s), with `hits` (s) in.
+    fn play(
+        tracker: &mut AccuracyTracker,
+        (score, timing): &(Score, ScoreTiming),
+        from: f64,
+        to: f64,
+        hits: &[f64],
+    ) {
+        let mut hits = hits.iter().copied().peekable();
+        let mut now = from;
+        while now <= to {
+            while let Some(hit) = hits.next_if(|&h| h <= now) {
+                tracker.record_hit(hit, timing, score);
+            }
+            tracker.update_progress(now, timing, score);
+            now += 1.0 / 60.0;
+        }
+    }
+
+    #[test]
+    fn only_the_notes_of_the_range_are_judged() {
+        let played = looping(2, 3);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, played.1.loop_start_tick() as f64);
+        // Two passes of bars 2 and 3, the first played on time.
+        let hits: Vec<f64> = (0..8).map(|i| i as f64 * 0.5).collect();
+        play(&mut tracker, &played, 0.0, 8.0, &hits);
+        let summary = tracker.live_summary().unwrap();
+        // The second pass is missed but for its last note, not final yet.
+        assert_eq!((summary.hits, summary.misses), (8, 7));
+        assert!(matches!(tracker.mark_for_onset(note(2, 0)), Some(AccuracyMark::Miss)));
+        assert!(matches!(tracker.mark_for_onset(note(3, 3)), Some(AccuracyMark::Hit { .. })));
+        // Bars 1 and 4 never play: never missed.
+        for beat in 0..4 {
+            assert!(tracker.mark_for_onset(note(1, beat)).is_none());
+            assert!(tracker.mark_for_onset(note(4, beat)).is_none());
+        }
+    }
+
+    #[test]
+    fn a_late_hit_on_the_ranges_last_note_counts_across_the_wrap() {
+        let played = looping(2, 3);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, played.1.loop_start_tick() as f64);
+        // Bar 3's last note is due at 3.5 s; the hit 60 ms late comes in only
+        // once the cursor is back at bar 2's start.
+        play(&mut tracker, &played, 0.0, 4.1, &[]);
+        tracker.record_hit(3.56, &played.1, &played.0);
+        play(&mut tracker, &played, 4.1, 4.9, &[]);
+        assert!(matches!(
+            tracker.mark_for_onset(note(3, 3)),
+            Some(AccuracyMark::Hit { diff_ticks, .. }) if diff_ticks > 0.0
+        ));
+        assert_eq!(tracker.live_summary().unwrap().hits, 1);
+        // Nor did it count for bar 2's first note, 440 ms away.
+        assert!(matches!(tracker.mark_for_onset(note(2, 0)), Some(AccuracyMark::Miss)));
+    }
+
+    #[test]
+    fn a_new_range_carries_the_run_on() {
+        let old = looping(2, 3);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, old.1.loop_start_tick() as f64);
+        // One pass of bars 2 and 3 on time.
+        let hits: Vec<f64> = (0..8).map(|i| i as f64 * 0.5).collect();
+        play(&mut tracker, &old, 0.0, 3.99, &hits);
+        // The last hit's note is not final yet.
+        assert_eq!(tracker.live_summary().unwrap().hits, 7);
+        // At 4 s the range becomes bar 1 alone: the clock is anchored at its
+        // downbeat, as the app does when the cursor gets there.
+        let new = looping(1, 1);
+        tracker.loop_changed();
+        // The open stretch closed with the hit it had.
+        assert_eq!(tracker.live_summary().unwrap().hits, 8);
+        tracker.realign_start_time(4.0, new.1.loop_start_tick() as f64);
+        let hits: Vec<f64> = (0..8).map(|i| 4.0 + i as f64 * 0.5).collect();
+        play(&mut tracker, &new, 4.0, 8.0, &hits);
+        let summary = tracker.live_summary().unwrap();
+        // Nothing was reset: the counts go on, and bar 1's notes count now.
+        assert!(summary.hits >= 8 + 7, "{summary:?}");
+        assert_eq!(summary.misses, 0, "{summary:?}");
+        assert!(matches!(tracker.mark_for_onset(note(1, 0)), Some(AccuracyMark::Hit { .. })));
+        // The old range's marks stay, its notes are no longer judged.
+        assert!(matches!(tracker.mark_for_onset(note(2, 1)), Some(AccuracyMark::Hit { .. })));
+        assert!(tracker.mark_for_onset(note(4, 0)).is_none());
     }
 }
 

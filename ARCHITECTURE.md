@@ -381,6 +381,50 @@ spread across callers.
   `written_global_tick` maps the audio position back so the cursor reaches a
   swung note when it sounds. Pairs start at the downbeat, tuplet onsets and a
   trailing incomplete pair stay straight. Not stored with library patterns.
+- Loop range (`grooph_measure::BarRange`, #384): the bars `a..=b` of Practice's
+  or the score tab's document that play and loop; without one the whole score
+  does. Measure indices and global ticks stay the score's, and so does the
+  schedule; `PlaybackOptions::range` carries the range and `ScoreTiming::with_loop`
+  makes it the timing's loop: `total_loop_ticks`/`total_loop_seconds` are the
+  range's, `loop_start_tick`/`loop_end_tick` its ends, `seconds_to_global_tick`
+  counts from `a`'s downbeat and goes round the range (`wrap_tick`), and
+  `score_ticks` is the whole score's. `TickSource::restart` starts at `a` (the
+  count-in in `a`'s meter and tempo, `count_in_plan`); at every barline the
+  next bar is the one after (bar 1 after the last) if it is in the range, else
+  `a` (`BarRange::next_bar`), so a range changed while playing takes over at
+  the next barline, without a pause or count-in, playing on into it where it
+  can. A plan with only a new range leaves the cursor alone. `bars()` counts
+  the bars played, so the gap click counts them in the range and a ramp in
+  loops steps once per pass (`TickSource::loop_len`, the range's bars, a new
+  range's from the barline it takes over at). The app does the same
+  with its cursor (`playback_clock::advance_tick`, `next_bar_tick`) and keeps
+  the range still played until then (`loop_range::LoopPlayback::held`) for its
+  timing (`Grooph::played_range`; the audio gets the document's,
+  `audio_range`); when the cursor crosses the barline it reports
+  `ScoreChange::Range` (`cross_barline`); a tempo change keeps the old range
+  until then. The output latency takes the position heard back over a
+  barline into the bar the cursor is still in (`playback_clock::heard_tick`),
+  and the count-in ends once `a`'s downbeat is heard: timed from when the
+  engine left it (`CountInState::Heard`), as a loop may be shorter than the
+  latency. The app's ramp reads the loop length from the engine
+  (`BarState::loop_len`). None in the metronome, a
+  calibration, endless mode or the embedded view.
+- The loop button (🔁, `Grooph::toggle_loop`) sits between play and share in
+  both transport rows and next to play in the editor's bar, filled in the
+  accent colour while a range is set; it switches the range off, and on again
+  with the one last switched off (`RhythmDoc::parked_range`, moved by edits
+  with its bars, saved as `parked_range`, forgotten by another score and
+  endless mode), else with all bars. On the staff
+  (`loop_range::loop_flags`, after the marks, before `staff_input`) a flag in
+  the accent colour stands on the barline before `a` and after `b`, drawn over
+  the space above the row; its grab area (`grab_rect`, 44 pt) over the top of
+  its barline drags it (`StaffView::loop_drag`), snapping to the nearest
+  barline of the row under the finger (`nearest_bar`), one bar before the other
+  flag at most; letting go sets the range (`set_loop_range`). A press there
+  never reaches `staff_input`, and the bar menu's chip moves clear of a flag.
+  Bars outside the range get the gap click's veil without 🔇
+  (`draw_outside_bar`), never the gap click's own, in the view and the editor
+  (still editable); the ghost bar stays as it is.
 
 ## Text notation and shareable links
 
@@ -607,7 +651,7 @@ grooph's metronome runs inside AI chats as an
   8th or 16th grid (triplets → 8ths, mixed → 16ths). Scheduled as `SoundType::Ghost`,
   volume via the mixer's "Ghost notes" slider (`AudioSettings::ghost`).
 - Count-in (`PlaybackOptions::count_in`): `TickSource` plays one bar of
-  clicks on every beat unit of the first measure (`SoundType::CountIn` on the
+  clicks on every beat unit of the first measure (of the loop range, if any) (`SoundType::CountIn` on the
   downbeat and primary beats, the quieter `CountInSoft` in between, so 7/8
   counts in all seven eighths) before the score; `Audio::playback_position` is negative meanwhile. The UI
   holds the cursor at 0 (`CountInState`) and re-anchors the accuracy session
@@ -694,7 +738,8 @@ grooph's metronome runs inside AI chats as an
 
 - `grooph_audio::{GapClick, TempoRamp}` (`crates/audio/src/trainer.rs`), carried in
   `PlaybackOptions`. Both depend only on the bar count since the score started
-  (`TickSource::bars`, across loops), so nothing rebuilds the schedule.
+  (`TickSource::bars`, across loops; with a loop range the bars played in it,
+  a loop being one pass of it), so nothing rebuilds the schedule.
 - Both are part of each page's `PlaybackSettings`: the metronome, Practice and
   the score tab each have their own (`settings::TabPlayback`, read through
   `Grooph::tab_playback`, the page shown or behind More), with tempo, count-in,
@@ -776,6 +821,14 @@ grooph's metronome runs inside AI chats as an
   the frame time. Each source has its own input offset (`PlayAlongSettings`).
 - While tap capture is active, staff presses (and presses on the metronome's
   ring) are hits, not edits.
+- With a loop range only its notes are listed and judged
+  (`compute_global_beat_onsets` over `timing.loop_bars()`, neighbours linked
+  round from `b` to `a`); notes outside it are never missed. The session's
+  ticks stay the score's, on a loop from `loop_start_tick` (`Lane::at_or_before`,
+  `wrap_tick`), so marks keep their keys. A new range carries the run on
+  (`AccuracyTracker::loop_changed`): the open stretch is made final with the
+  hits it has, the lanes start again at the clock's new anchor, and counts,
+  marks and extra hits stay until the run ends.
 - Where (`Grooph::accuracy_active`): with Timing feedback on, in Practice, in
   the metronome tab (its click bar and counter rhythm) and in the score tab
   (its score; not while it is edited, `Mode::Edit`), never embedded in a
@@ -975,6 +1028,18 @@ grooph's metronome runs inside AI chats as an
   it first, so no generator action (🎲, a setting, a generator
   link, endless mode) replaces the score tab's score. Endless mode and ghost
   notes run on Practice's rhythm only.
+- Each rhythm document has its own loop range (`RhythmDoc::range`; see
+  "Audio, playback, counting"). Setting, moving or switching it off
+  (`RhythmDoc::set_range`) is no undo step and nothing unsaved. The undo
+  snapshot (`EditorSnapshot::range`) keeps it with the score and how often the
+  user had changed it then (`range_changes`): undo and redo bring it back with
+  the bars it covered, unless the user changed it since, which then stays,
+  cut to the score (one switched off stays off). Duplicate bar, Delete bar and
+  the ghost bar move it with its bars (`BarRange::after_insert`/`after_remove`;
+  a copy of `b` and an appended bar lie outside, the only bar deleted clears
+  it). `replace_score` drops it (`drop_range`), so another score opens without
+  one and undo brings the old one back with it; switching endless mode on
+  deletes Practice's (`switch_endless_on`).
 - The library and the unsaved-changes checks reach the score tab's document
   as `docs.score`, from any page and without closing the metronome. A tempo
   change marks it unsaved on the score tab, and on any page when it is a
@@ -984,7 +1049,10 @@ grooph's metronome runs inside AI chats as an
   tab's as `score_doc`, Practice's as `practice_doc`, and `document` the
   page behind More. `SavedDoc::of`/`into_doc` turn a document into its
   entry and back, the same way for both. Within an entry, too, a field that
-  does not read falls back alone (`persist::repair_doc`). A version 2 state
+  does not read falls back alone (`persist::repair_doc`). The loop range is
+  saved in the entry (`range`, written only when set; one that does not fit
+  the score, or ends before it starts, reads as none), never in the library or
+  links. A version 2 state
   kept the score tab's document in flat fields and Practice's rhythm as
   `practice_score`; `persist::migrate` moves them into the entries without
   a backup. A state saved before the two documents has no Practice
@@ -1030,7 +1098,7 @@ grooph's metronome runs inside AI chats as an
 - Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `StaffView::narrow_screen`)
   get tighter staff spacing, so glyphs are bigger on phones.
 - While a tempo ramp runs, the card shows the tempo being played ("BPM now").
-- Share (right of play; not in the editors) builds a score link with tempo
+- Share (right of play, past the loop button; not in the editors) builds a score link with tempo
   and swing; on the web it opens the system share sheet
   (`platform::open_share_sheet`, Web Share API), else copies the link. In the
   Metronome tab, share (right in the bar) builds a `ts` link with tempo, swing

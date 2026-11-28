@@ -13,9 +13,9 @@
 //! audio thread), recover `(measure_idx, local_tick)` so a UI cursor or an
 //! incoming MIDI event can be attributed to the correct measure.
 
-use crate::Score;
 use crate::grid::DEFAULT_GRID;
 use crate::swing::Swing;
+use crate::{BarRange, Score};
 
 /// Slowest tempo the app offers, in BPM.
 pub const MIN_BPM: u32 = 20;
@@ -39,6 +39,10 @@ pub struct ScoreTiming {
     measure_seconds_starts: Vec<f64>,
     /// Seconds per tick, per measure.
     seconds_per_tick: Vec<f64>,
+    /// The bars that loop (all of them unless [`Self::with_loop`] says
+    /// otherwise); ticks and measure indices stay the score's.
+    loop_bars: BarRange,
+    /// Ticks and seconds of the loop.
     total_loop_ticks: u64,
     total_loop_seconds: f64,
     /// Swing feel applied to performed onsets. The tick axis itself stays
@@ -58,6 +62,7 @@ impl Default for ScoreTiming {
             ticks_per_beat: Vec::new(),
             measure_seconds_starts: vec![0.0],
             seconds_per_tick: Vec::new(),
+            loop_bars: BarRange::all(1),
             total_loop_ticks: 0,
             total_loop_seconds: 0.0,
             swing: Swing::default(),
@@ -106,10 +111,60 @@ impl ScoreTiming {
             ticks_per_beat,
             measure_seconds_starts,
             seconds_per_tick,
+            loop_bars: BarRange::all(n),
             total_loop_ticks: tick_acc,
             total_loop_seconds: sec_acc,
             swing: Swing::default(),
         }
+    }
+
+    /// The timing with `bars` looping instead of the whole score (cut to
+    /// the score; `None` loops the whole score). The loop's seconds count
+    /// from its first bar's downbeat: [`Self::seconds_to_global_tick`] and
+    /// [`Self::global_tick_to_seconds`] go round it, the ticks staying the
+    /// score's.
+    pub fn with_loop(mut self, bars: Option<BarRange>) -> Self {
+        let n = self.measure_count();
+        if n == 0 {
+            return self;
+        }
+        let bars = bars.map_or(BarRange::all(n), |b| b.clamped(n));
+        self.loop_bars = bars;
+        let end = bars.last() + 1;
+        self.total_loop_ticks = self.measure_starts[end] - self.measure_starts[bars.first()];
+        self.total_loop_seconds =
+            self.measure_seconds_starts[end] - self.measure_seconds_starts[bars.first()];
+        self
+    }
+
+    /// The bars that loop.
+    pub fn loop_bars(&self) -> BarRange {
+        self.loop_bars
+    }
+
+    /// Global tick where the loop starts: its first bar's downbeat.
+    pub fn loop_start_tick(&self) -> u64 {
+        self.measure_starts[self.loop_bars.first().min(self.measure_count())]
+    }
+
+    /// Global tick where the loop ends (after its last bar).
+    pub fn loop_end_tick(&self) -> u64 {
+        self.loop_start_tick() + self.total_loop_ticks
+    }
+
+    /// `global_tick` moved by whole loops into `[loop_start_tick,
+    /// loop_end_tick)`.
+    pub fn wrap_tick(&self, global_tick: f64) -> f64 {
+        if self.total_loop_ticks == 0 {
+            return global_tick;
+        }
+        let start = self.loop_start_tick() as f64;
+        start + (global_tick - start).rem_euclid(self.total_loop_ticks as f64)
+    }
+
+    /// Ticks of the whole score, whatever loops.
+    pub fn score_ticks(&self) -> u64 {
+        self.measure_starts[self.measure_count()]
     }
 
     pub fn with_swing(mut self, swing: Swing) -> Self {
@@ -186,22 +241,23 @@ impl ScoreTiming {
         self.measure_starts[measure_idx] + local_tick as u64
     }
 
-    /// Forward: real seconds → global tick. Wraps over `total_loop_seconds` if
-    /// the input is outside `[0, total_loop_seconds)`.
+    /// Forward: real seconds since the loop's first downbeat → global tick
+    /// in the loop. Wraps over `total_loop_seconds` if the input is outside
+    /// `[0, total_loop_seconds)`.
     pub fn seconds_to_global_tick(&self, seconds: f64) -> f64 {
         if self.total_loop_seconds <= 0.0 {
-            return 0.0;
+            return self.loop_start_tick() as f64;
         }
-        let s = seconds.rem_euclid(self.total_loop_seconds);
+        let first = self.loop_bars.first();
+        let s = seconds.rem_euclid(self.total_loop_seconds) + self.measure_seconds_starts[first];
         // Find the measure containing s. Linear scan is fine for realistic
         // score sizes; switch to binary search if profiling demands it.
-        let mut idx = 0usize;
-        for i in 0..self.measure_count() {
+        let mut idx = first;
+        for i in self.loop_bars.bars() {
+            idx = i;
             if s < self.measure_seconds_starts[i + 1] {
-                idx = i;
                 break;
             }
-            idx = i;
         }
         let local_seconds = s - self.measure_seconds_starts[idx];
         let local_tick = local_seconds / self.seconds_per_tick[idx];
@@ -209,31 +265,33 @@ impl ScoreTiming {
     }
 
     /// Backward: global tick → `(measure_idx, local_tick)`. The input is
-    /// wrapped over `total_loop_ticks`; the result's local_tick is in
-    /// `[0, ticks_per_measure(measure_idx))`.
+    /// wrapped into the loop ([`Self::wrap_tick`]); the result's local_tick
+    /// is in `[0, ticks_per_measure(measure_idx))`.
     pub fn to_local(&self, global_tick: f64) -> (usize, f64) {
         if self.total_loop_ticks == 0 {
             return (0, 0.0);
         }
-        let g = global_tick.rem_euclid(self.total_loop_ticks as f64);
+        let g = self.wrap_tick(global_tick);
         let idx = self.measure_at_global_tick(g);
         let local = g - self.measure_starts[idx] as f64;
         (idx, local)
     }
 
-    /// Backward: global tick → seconds.
+    /// Backward: global tick (wrapped into the loop) → seconds since the
+    /// loop's first downbeat.
     pub fn global_tick_to_seconds(&self, global_tick: f64) -> f64 {
         if self.total_loop_ticks == 0 {
             return 0.0;
         }
-        let g = global_tick.rem_euclid(self.total_loop_ticks as f64);
+        let g = self.wrap_tick(global_tick);
         let idx = self.measure_at_global_tick(g);
         let local_tick = g - self.measure_starts[idx] as f64;
         self.measure_seconds_starts[idx] + local_tick * self.seconds_per_tick[idx]
+            - self.measure_seconds_starts[self.loop_bars.first()]
     }
 
     /// Measure containing the given global tick. Assumes `global_tick` is in
-    /// `[0, total_loop_ticks)`; for inputs outside this range, callers should
+    /// `[0, score_ticks)`; for inputs outside this range, callers should
     /// `rem_euclid` first (the public `to_local` / `global_tick_to_seconds`
     /// methods do this internally).
     pub fn measure_at_global_tick(&self, global_tick: f64) -> usize {
@@ -419,9 +477,41 @@ mod tests {
         let s = score_of(&[TimeSignature::FOUR_FOUR]);
         let t = ScoreTiming::from_score(&s, 120);
         let one_loop = t.total_loop_seconds();
+        assert_eq!(t.loop_bars(), BarRange::all(1));
         // 1.5 loops should map to 0.5 loops.
         let g_half = t.seconds_to_global_tick(0.5 * one_loop);
         let g_1_5 = t.seconds_to_global_tick(1.5 * one_loop);
         assert!((g_half - g_1_5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_loop_range_counts_its_bars_from_its_first_downbeat() {
+        // 4/4 (2 s), 3/4 (1.5 s), 6/8 (1.5 s), 4/4 at 120 BPM; bars 2..=3 loop.
+        let s = score_of(&[
+            TimeSignature::FOUR_FOUR,
+            TimeSignature::THREE_FOUR,
+            TimeSignature::SIX_EIGHT,
+            TimeSignature::FOUR_FOUR,
+        ]);
+        let whole = ScoreTiming::from_score(&s, 120);
+        let t = whole.clone().with_loop(BarRange::new(1, 2));
+        assert_eq!(t.loop_start_tick(), whole.measure_start_tick(1));
+        assert_eq!(t.loop_end_tick(), whole.measure_start_tick(3));
+        assert_eq!(t.total_loop_ticks(), t.loop_end_tick() - t.loop_start_tick());
+        assert!((t.total_loop_seconds() - 3.0).abs() < 1e-9);
+        assert_eq!(t.score_ticks(), whole.total_loop_ticks());
+        // Seconds count from bar 2's downbeat and go round the range.
+        assert_eq!(t.seconds_to_global_tick(0.0), whole.measure_start_tick(1) as f64);
+        let in_six_eight = t.seconds_to_global_tick(1.5 + 3.0);
+        assert!((in_six_eight - whole.measure_start_tick(2) as f64).abs() < 1e-6);
+        assert_eq!(t.to_local(whole.measure_start_tick(3) as f64), (1, 0.0));
+        assert!((t.global_tick_to_seconds(whole.measure_start_tick(2) as f64) - 1.5).abs() < 1e-9);
+        assert_eq!(t.wrap_tick(t.loop_end_tick() as f64), t.loop_start_tick() as f64);
+        // `None`, and a range past the score, are cut to the score.
+        assert_eq!(whole.clone().with_loop(None), whole);
+        assert_eq!(
+            whole.clone().with_loop(BarRange::new(3, 9)).loop_bars(),
+            BarRange::new(3, 3).unwrap()
+        );
     }
 }

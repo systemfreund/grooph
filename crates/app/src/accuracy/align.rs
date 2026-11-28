@@ -188,7 +188,9 @@ impl<'a> Lane<'a> {
 
     /// The last occurrence heard at or before `x`.
     pub(super) fn at_or_before(&self, x: f64) -> i64 {
-        let loop_idx = (x / self.total).floor() as i64;
+        // A loop spans its range's ticks, from the range's first downbeat.
+        let start = self.timing.loop_start_tick() as f64;
+        let loop_idx = ((x - start) / self.total).floor() as i64;
         let r = x - loop_idx as f64 * self.total;
         let j = self.idx.partition_point(|&i| self.beats[i].performed_tick as f64 <= r) as i64;
         loop_idx * self.len() + j - 1

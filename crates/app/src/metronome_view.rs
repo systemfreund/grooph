@@ -29,7 +29,6 @@ use crate::accuracy::{
 use crate::documents::{Doc, Document};
 use crate::measure_panel::{grade_color, reference_color};
 use crate::metronome_bars::MeterBars;
-use crate::state::CountInState;
 use crate::tokens;
 use crate::{Grooph, TransportState};
 use eframe::egui;
@@ -310,11 +309,6 @@ impl Grooph {
     /// the other meters' too (see [`crate::metronome_bars`]).
     fn metronome_doc_bar(&self) -> &Measure {
         &self.editor.docs.metronome.score().measures()[0]
-    }
-
-    /// Bars in the score being played, for the tempo ramp's loops.
-    pub(crate) fn played_bars(&self) -> usize {
-        self.played_score().len()
     }
 
     /// Open the metronome's document, on its first click.
@@ -785,7 +779,7 @@ impl Grooph {
 
         // The beat being counted during the count-in shows on the button.
         let count_in_beat = current_turn
-            .filter(|_| self.playback_ctl.playback.count_in == CountInState::Active)
+            .filter(|_| self.playback_ctl.playback.count_in.counting())
             .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
         if paint_play_middle(ui, &resp, center, button, playing, count_in_beat) {

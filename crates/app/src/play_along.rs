@@ -355,14 +355,15 @@ impl Grooph {
         // The score hasn't started yet: keep re-anchoring the session at "now"
         // and ignore hits; `realign_accuracy_clock` fixes the anchor exactly
         // when the count-in ends.
+        let timing = self.score_timing();
         if self.playback_ctl.playback.counting_in() {
             if active {
-                self.playback_ctl.accuracy.tracker.on_playback_start_at(now, 0.0);
+                let start = crate::playback_clock::loop_start(&timing);
+                self.playback_ctl.accuracy.tracker.on_playback_start_at(now, start);
             }
             return;
         }
 
-        let timing = self.score_timing();
         let total_loop_seconds = timing.total_loop_seconds();
         if active && !self.playback_ctl.accuracy.tracker.has_start_time() {
             let (start_time, last_tick) = if total_loop_seconds > 0.0 {
