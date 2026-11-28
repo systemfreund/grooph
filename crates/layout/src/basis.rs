@@ -3,13 +3,25 @@ use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::onsets::merged;
 
+/// How the space after a note grows with its duration: a note twice as
+/// long gets 2^0.6 ≈ 1.5 times the room, not twice, as in printed music
+/// (Gould, *Behind Bars*: spacing is proportional to duration only
+/// loosely, long notes are drawn closer than their length).
+const SPACING_EXPONENT: f32 = 0.6;
+
+/// The share of a note or column `ticks` long in the width spaced by
+/// duration (see [`SPACING_EXPONENT`]).
+fn weight_of(ticks: u32) -> f32 {
+    (ticks as f32).powf(SPACING_EXPONENT)
+}
+
 /// X position of each beat's note head, relative to the start of the note
 /// area `content_w` wide.
 ///
 /// Each note sits at its onset and its duration's space follows it, as in
 /// printed music: the first note sits `lead` in from the left edge and the
-/// last note's space runs up to the right edge. Space is proportional to
-/// duration.
+/// last note's space runs up to the right edge. Space grows with duration,
+/// less than proportionally (see [`weight_of`]).
 ///
 /// `min_advance[i]` (px, optional per beat) is the least distance beat `i`
 /// needs to the next note head or the barline so their glyphs don't touch.
@@ -26,7 +38,7 @@ pub fn calculate_x_centers(
     let body_w = content_w - lead;
 
     let weights: Vec<f32> =
-        durations.iter().map(|d| DEFAULT_GRID.ticks_of(d).unwrap_or(0) as f32).collect();
+        durations.iter().map(|d| weight_of(DEFAULT_GRID.ticks_of(d).unwrap_or(0))).collect();
     let needs: Vec<f32> =
         (0..durations.len()).map(|i| min_advance.get(i).copied().unwrap_or(0.0)).collect();
     let advances = share_out(&weights, &needs, body_w);
@@ -65,7 +77,7 @@ impl Columns {
         let beats: Vec<&[Beat]> = voices.iter().map(|(beats, _)| *beats).collect();
         let onsets: Vec<u32> = merged(&beats).iter().map(|o| o.tick).collect();
         let weights: Vec<f32> = (0..onsets.len())
-            .map(|j| (onsets.get(j + 1).copied().unwrap_or(end) - onsets[j]) as f32)
+            .map(|j| weight_of(onsets.get(j + 1).copied().unwrap_or(end) - onsets[j]))
             .collect();
         let mut needs = vec![0.0f32; onsets.len()];
         for ((_, min_advance), starts) in voices.iter().zip(&starts) {
@@ -158,29 +170,33 @@ mod tests {
     use grooph_measure::duration::{e, q};
 
     #[test]
-    fn test_proportional_spacing() {
+    fn spacing_grows_with_duration_less_than_proportionally() {
         let beats = vec![Beat::note(q()), Beat::note(e()), Beat::note(e())];
         let width = 100.0;
-        // 10 px lead, then 90 px split as quarter / eighth / eighth.
+        // 10 px lead, then 90 px split as quarter / eighth / eighth: the
+        // quarter gets 2^0.6 ≈ 1.52 times an eighth's room, the last
+        // eighth's room runs to the right edge.
         let centers = calculate_x_centers(&beats, width, 10.0, &[]);
 
         assert_eq!(centers.len(), 3);
+        let quarter = centers[1] - centers[0];
+        let eighth = centers[2] - centers[1];
         assert!((centers[0] - 10.0).abs() < 1e-5, "Expected 10.0, got {}", centers[0]);
-        assert!((centers[1] - 55.0).abs() < 1e-5, "Expected 55.0, got {}", centers[1]);
-        assert!((centers[2] - 77.5).abs() < 1e-5, "Expected 77.5, got {}", centers[2]);
+        assert!((quarter / eighth - 2f32.powf(0.6)).abs() < 1e-4, "{centers:?}");
+        assert!((width - centers[2] - eighth).abs() < 1e-4, "{centers:?}");
     }
 
     #[test]
     fn crowded_beats_keep_their_minimum_advance() {
-        // Quarter, then two sixteenths that each need 20 px. Proportionally
-        // they'd get 100/6 px each; they keep 20 and the quarter takes the
-        // rest.
+        // Quarter, then two sixteenths that each need 30 px. By duration
+        // they'd get about 23 px each; they keep 30 and the quarter takes
+        // the rest.
         use grooph_measure::duration::s;
         let beats = vec![Beat::note(q()), Beat::note(s()), Beat::note(s())];
-        let centers = calculate_x_centers(&beats, 100.0, 0.0, &[0.0, 20.0, 20.0]);
+        let centers = calculate_x_centers(&beats, 100.0, 0.0, &[0.0, 30.0, 30.0]);
         assert!((centers[0] - 0.0).abs() < 1e-4);
-        assert!((centers[1] - 60.0).abs() < 1e-4, "got {}", centers[1]);
-        assert!((centers[2] - 80.0).abs() < 1e-4, "got {}", centers[2]);
+        assert!((centers[1] - 40.0).abs() < 1e-4, "got {}", centers[1]);
+        assert!((centers[2] - 70.0).abs() < 1e-4, "got {}", centers[2]);
     }
 
     #[test]
